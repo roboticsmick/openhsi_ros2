@@ -219,6 +219,8 @@ GigE Vision cameras require specific network configuration for optimal performan
 
 Configure a static IP address in the 169.254.x.x range:
 
+##### Option A: Using GUI (Desktop with Display)
+
 1. Navigate to **Settings → Network → Ethernet → IPv4**
 2. Select the **IPv4 Settings** tab
 3. Choose **Manual** for Method
@@ -231,30 +233,73 @@ Configure a static IP address in the 169.254.x.x range:
 
 5. Click **Apply**
 
+##### Option B: Using SSH/Command Line
+
+```bash
+# First, identify your ethernet interface and existing connection
+nmcli device status
+nmcli connection show
+
+# Configure the ethernet connection (replace "Wired connection 1" and "eno1" with your actual connection name and interface)
+sudo nmcli connection modify "Wired connection 1" \
+  connection.interface-name eno1 \
+  ipv4.method manual \
+  ipv4.addresses 169.254.0.1/16 \
+  ipv4.gateway ""
+
+# Activate the connection
+sudo nmcli connection up "Wired connection 1"
+
+# Verify the configuration
+nmcli connection show "Wired connection 1" | grep ipv4
+```
+
 #### 2.2.2 Enable Jumbo Frames
 
 Jumbo frames improve throughput for high-bandwidth GigE cameras:
 
+##### Option A: Using GUI (Desktop with Display)
+
 1. Navigate to **Settings → Network → Ethernet → Identity**
 2. Change **MTU** to **9000**
 3. Click **Apply**
+
+##### Option B: Using SSH/Command Line
+
+```bash
+# Add MTU 9000 to the existing connection configuration
+sudo nmcli connection modify "Wired connection 1" \
+  802-3-ethernet.mtu 9000
+
+# Reactivate the connection to apply changes
+sudo nmcli connection down "Wired connection 1"
+sudo nmcli connection up "Wired connection 1"
+
+# Verify MTU is set to 9000
+ip addr show eno1 | grep mtu
+```
+
+**Expected output:**
+```
+4: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 qdisc mq state UP group default qlen 1000
+```
 
 #### 2.2.3 Adjust Receive Buffer Size
 
 **Check maximum RX buffer size:**
 
 ```bash
-# Find your ethernet interface name (e.g., eth0, enp0s31f6, etc.)
+# Find your ethernet interface name (e.g., eth0, eno1, enp0s31f6, etc.)
 ip link show | grep mtu
 
-# Check current and maximum ring buffer settings (replace eth0 with your interface)
-sudo ethtool -g eth0
+# Check current and maximum ring buffer settings (replace eno1 with your interface)
+sudo ethtool -g eno1
 ```
 
 Example output:
 
 ```
-Ring parameters for eth0:
+Ring parameters for eno1:
 Pre-set maximums:
 RX:         1024
 RX Mini:    n/a
@@ -271,10 +316,10 @@ TX:         256
 
 ```bash
 # Replace eth0 with your interface and 1024 with your maximum RX value
-sudo ethtool -G eth0 rx 1024
+sudo ethtool -G eno1 rx 1024
 
 # Verify the change
-sudo ethtool -g eth0
+sudo ethtool -g eno1
 ```
 
 **Make permanent (using systemd):**
@@ -285,7 +330,7 @@ Create a systemd service to set the buffer size on boot:
 sudo nano /etc/systemd/system/set-ethernet-buffers.service
 ```
 
-Add the following content (replace `eth0` and `1024` with your values):
+Add the following content (replace `eno1` and `1024` with your values):
 
 ```ini
 [Unit]
@@ -294,7 +339,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/sbin/ethtool -G eth0 rx 1024
+ExecStart=/usr/sbin/ethtool -G eno1 rx 1024
 RemainAfterExit=yes
 
 [Install]
@@ -330,7 +375,7 @@ Disable reverse path filtering for GigE Vision cameras:
 ```bash
 sudo sysctl -w net.ipv4.conf.default.rp_filter=0
 sudo sysctl -w net.ipv4.conf.all.rp_filter=0
-sudo sysctl -w net.ipv4.conf.eth0.rp_filter=0  # Replace eth0 with your interface
+sudo sysctl -w net.ipv4.conf.eno1.rp_filter=0  # Replace eth0 with your interface
 ```
 
 **Make permanent:**
@@ -338,7 +383,7 @@ sudo sysctl -w net.ipv4.conf.eth0.rp_filter=0  # Replace eth0 with your interfac
 Edit the network security configuration:
 
 ```bash
-sudo nano /etc/sysctl.d/10-network-security.conf
+sudo vim /etc/sysctl.d/10-network-security.conf
 ```
 
 Comment out the following lines by adding `#` at the beginning:
