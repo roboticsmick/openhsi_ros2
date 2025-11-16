@@ -1,5 +1,11 @@
 # Developer folders
-resources/
+resources/lucid_calibration/Archive/
+resources/openhsi_calibration
+resources/openhsi_headwall_jetson
+resources/tests
+resources/coding_guidelines.md
+resources/headwall_documentation
+resources/research
 test/
 arena_sdk/
 docs/
