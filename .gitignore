@@ -1,3 +1,8 @@
+/Developer folders
+resources/
+test/
+arena_sdk/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
