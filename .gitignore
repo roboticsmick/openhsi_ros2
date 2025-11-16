@@ -1,7 +1,8 @@
-/Developer folders
+# Developer folders
 resources/
 test/
 arena_sdk/
+docs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
