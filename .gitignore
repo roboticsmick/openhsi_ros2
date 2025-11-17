@@ -6,6 +6,12 @@ resources/tests
 resources/coding_guidelines.md
 resources/headwall_documentation
 resources/research
+resources/lucid_calibration/*.nc
+resources/lucid_calibration/*.txt
+resources/lucid_calibration/*.json
+resources/ximea_calibration/*.nc
+resources/ximea_calibration/*.txt
+resources/ximea_calibration/*.json
 test/
 arena_sdk/
 docs/
