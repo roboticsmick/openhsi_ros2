@@ -407,14 +407,19 @@ sudo sysctl -p /etc/sysctl.d/10-network-security.conf
 
 ### 3.1 Camera Configuration Files
 
-Camera-specific settings are stored in the `config/` directory:
+Camera-specific settings and calibration files are organized by camera type in the `config/` directory:
 
-- `cam_settings_ximea_MVCV-1082.json` - Ximea camera configuration (crop size, wavelengths, etc.)
-- `cam_settings_lucid.json` - Lucid camera configuration
+**Lucid Camera:**
+- `config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json` - Camera settings (crop size, exposure, etc.)
+- `config/lucid_calibration/*.nc` - Calibration data files (NetCDF format)
 
-### 3.2 Calibration Files
+**Ximea Camera:**
+- `config/ximea_calibration/cam_settings_ximea_MVCV-1082.json` - Camera settings
+- `config/ximea_calibration/*.nc` - Calibration data files (NetCDF format)
 
-Calibration data is stored in NetCDF format (`.nc` files) in the `resources/lucid_calibration/` directory.
+### 3.2 Calibration File Format
+
+Calibration data is stored in NetCDF format (`.nc` files).
 
 **Calibration file structure:**
 - `wavelengths` - Wavelength array (nm) for each pixel
@@ -426,7 +431,7 @@ Calibration data is stored in NetCDF format (`.nc` files) in the `resources/luci
 
 **Creating calibration files:**
 
-See [resources/lucid_calibration/CALIBRATION_TUTORIAL.md](resources/lucid_calibration/CALIBRATION_TUTORIAL.md) for detailed calibration procedures.
+See [config/lucid_calibration/CALIBRATION_TUTORIAL.md](config/lucid_calibration/CALIBRATION_TUTORIAL.md) for detailed calibration procedures.
 
 ### 3.3 Install Python Dependencies
 
@@ -447,7 +452,7 @@ source /media/logic/USamsung/ros2_ws/install/setup.bash
 # Run with Ximea camera (raw data)
 ros2 run openhsi_ros2 hyperspec_node --ros-args \
     -p camera_type:=ximea \
-    -p config_file:=/path/to/cam_settings_ximea.json \
+    -p config_file:=config/ximea_calibration/cam_settings_ximea_MVCV-1082.json \
     -p processing_lvl:=0 \
     -p cap_hz:=10.0 \
     -p exposure_ms:=10.0
@@ -455,7 +460,7 @@ ros2 run openhsi_ros2 hyperspec_node --ros-args \
 # Run with Lucid camera (raw data)
 ros2 run openhsi_ros2 hyperspec_node --ros-args \
     -p camera_type:=lucid \
-    -p config_file:=/path/to/cam_settings_lucid.json \
+    -p config_file:=config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
     -p processing_lvl:=0 \
     -p cap_hz:=10.0 \
     -p exposure_ms:=15.0
@@ -463,12 +468,12 @@ ros2 run openhsi_ros2 hyperspec_node --ros-args \
 
 #### With Calibration (Lucid Camera)
 
-```bash
+```bashcam_settings_lucid.json
 # Flat-field corrected data (processing_lvl=2)
 ros2 run openhsi_ros2 hyperspec_node --ros-args \
     -p camera_type:=lucid \
-    -p config_file:=config/cam_settings_lucid.json \
-    -p calibration_file:=resources/lucid_calibration/OpenHSI-06_calibration_Mono12_bin1.nc \
+    -p config_file:=config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
+    -p calibration_file:=config/lucid_calibration/OpenHSI-06_calibration_Mono12_bin1.nc \
     -p processing_lvl:=2 \
     -p cap_hz:=10.0 \
     -p exposure_ms:=15.0
@@ -476,8 +481,8 @@ ros2 run openhsi_ros2 hyperspec_node --ros-args \
 # Spectral radiance data (processing_lvl=3)
 ros2 run openhsi_ros2 hyperspec_node --ros-args \
     -p camera_type:=lucid \
-    -p config_file:=config/cam_settings_lucid.json \
-    -p calibration_file:=resources/lucid_calibration/OpenHSI-06_calibration_Mono12_bin1.nc \
+    -p config_file:=config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
+    -p calibration_file:=config/lucid_calibration/OpenHSI-06_calibration_Mono12_bin1.nc \
     -p processing_lvl:=3 \
     -p cap_hz:=10.0 \
     -p exposure_ms:=15.0

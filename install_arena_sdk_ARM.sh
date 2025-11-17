@@ -93,8 +93,7 @@ echo -e "\n${YELLOW}Installing Arena Python API...${NC}"
 cd "${SDK_INSTALL_DIR}/ArenaAPI"
 WHEEL_FILE=$(ls arena_api-*.whl 2>/dev/null | head -n 1)
 
-if [[ -n "${WHEEL_FILE}" ]]; then   source /home/orin/ros2_ws/src/openhsi_ros2/arena_sdk/setup_arena.sh
-
+if [[ -n "${WHEEL_FILE}" ]]; then
     # Try with --break-system-packages first (for newer Ubuntu versions)
     # Fall back to standard install if that flag is not supported (older pip)
     if pip3 install --user --break-system-packages "${WHEEL_FILE}" 2>/dev/null; then

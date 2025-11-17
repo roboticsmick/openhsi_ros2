@@ -36,8 +36,12 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         # Install launch files
         (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
-        # Install config files
-        (os.path.join("share", package_name, "config"), glob("config/*.json")),
+        # Install config files - Lucid camera
+        (os.path.join("share", package_name, "config/lucid_calibration"),
+         glob("config/lucid_calibration/*.json") + glob("config/lucid_calibration/*.nc")),
+        # Install config files - Ximea camera
+        (os.path.join("share", package_name, "config/ximea_calibration"),
+         glob("config/ximea_calibration/*.json") + glob("config/ximea_calibration/*.nc")),
     ],
     install_requires=[
         "setuptools",
