@@ -1,0 +1,27 @@
+{
+    "camera_id": "OpenHSI-06",
+    "row_slice": [
+        15,
+        910
+    ],
+    "resolution": [
+        928,
+        1064
+    ],
+    "fwhm_nm": 4,
+    "exposure_ms": 9.256736,
+    "datetime_str": "2021-05-26 03:26",
+    "binxy": [
+        1,
+        1
+    ],
+    "win_offset": [
+        84,
+        152
+    ],
+    "win_resolution": [
+        928,
+        1064
+    ],
+    "pixel_format": "Mono12"
+}

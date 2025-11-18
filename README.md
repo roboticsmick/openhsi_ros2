@@ -15,6 +15,9 @@ This package supports two hyperspectral camera systems:
 
 ---
 
+Your user needs to be part of the `plugdev` group to access USB devices without root:
+
+
 ## 1. Ximea Camera Setup
 
 This section covers installation and configuration for Ximea hyperspectral cameras using the OpenHSI library.
@@ -54,6 +57,9 @@ sudo ./install
 - In some cases, disabling "Secure Boot" in the BIOS/UEFI settings can resolve driver or device recognition issues
 
 ### 1.3 Configure USB 3.0 Support
+
+Your user needs to be part of the `plugdev` group to access USB devices without root:
+
 
 **Crucial for USB3 Cameras**
 
@@ -128,6 +134,9 @@ Add these lines:
 *              -       nice            0
 @realtime      -       nice            -16
 ```
+#net.ipv4.conf.default.rp_filter=2
+#net.ipv4.conf.all.rp_filter=2
+```
 
 Create the `realtime` group and add your user:
 
@@ -150,6 +159,9 @@ The OpenHSI `XimeaCamera` class usually handles these settings internally based 
 ```
 
 ---
+#net.ipv4.conf.default.rp_filter=2
+#net.ipv4.conf.all.rp_filter=2
+```
 
 ## 2. Lucid Vision Camera Setup
 
@@ -202,6 +214,9 @@ cd /media/logic/USamsung/ros2_ws/src/openhsi_ros2
 
 #### 2.1.4 Uninstalling Arena SDK
 
+#net.ipv4.conf.default.rp_filter=2
+#net.ipv4.conf.all.rp_filter=2
+```
 If you need to remove an existing installation (e.g., to switch architectures):
 
 ```bash
@@ -280,6 +295,9 @@ ip addr show eno1 | grep mtu
 ```
 
 **Expected output:**
+#net.ipv4.conf.default.rp_filter=2
+#net.ipv4.conf.all.rp_filter=2
+```
 ```
 4: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 qdisc mq state UP group default qlen 1000
 ```
@@ -300,6 +318,9 @@ Example output:
 
 ```
 Ring parameters for eno1:
+#net.ipv4.conf.default.rp_filter=2
+#net.ipv4.conf.all.rp_filter=2
+```
 Pre-set maximums:
 RX:         1024
 RX Mini:    n/a
@@ -342,6 +363,9 @@ Type=oneshot
 ExecStart=/usr/sbin/ethtool -G eno1 rx 1024
 RemainAfterExit=yes
 
+#net.ipv4.conf.default.rp_filter=2
+#net.ipv4.conf.all.rp_filter=2
+```
 [Install]
 WantedBy=multi-user.target
 ```

@@ -7,11 +7,7 @@ config/coding_guidelines.md
 config/headwall_documentation
 config/research
 config/lucid_calibration/*.nc
-config/lucid_calibration/*.txt
-config/lucid_calibration/*.json
 config/ximea_calibration/*.nc
-config/ximea_calibration/*.txt
-config/ximea_calibration/*.json
 test/
 arena_sdk/
 docs/

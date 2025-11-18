@@ -1,0 +1,37 @@
+{
+    "camera_id": "MVCV-1082",
+    "serial_num": "CAMAU2421014",
+    "pixel_format": "XI_RAW16",
+    "binxy": [
+        1,
+        1
+    ],
+    "exposure_ms": 10,
+    "win_offset_x_hw_api": 472,
+    "win_resolution_w_hw_api": 1024,
+    "win_offset_y_hw_api": 858,
+    "win_resolution_h_hw_api": 344,
+    "hardware_capture_resolution": [
+        344,
+        1024
+    ],
+    "headwall_spatial_offset_fullsensor_px": 472,
+    "headwall_spatial_size_px": 1024,
+    "headwall_spectral_offset_fullsensor_px": 858,
+    "headwall_spectral_size_px": 343,
+    "final_image_shape_after_crop": [
+        1024,
+        343
+    ],
+    "headwall_pixel_dispersion_nm_px": 1.7620399458839,
+    "headwall_pixel0_wavelength_nm": -1113.58997685154,
+    "fwhm_nm": 6,
+    "row_slice": [
+        0,
+        1023
+    ],
+    "resolution": [
+        1024,
+        343
+    ]
+}

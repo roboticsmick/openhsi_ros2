@@ -58,6 +58,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from std_msgs.msg import Header, Float64, Float64MultiArray, String
+from ament_index_python.packages import get_package_share_directory
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
 
@@ -581,10 +582,19 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
 
         try:
             from arena_api.system import system as arsys
-            from arena_api.system import DeviceNotFoundError
-
             self.arsys = arsys
-            self.DeviceNotFoundError = DeviceNotFoundError
+
+            # Try to import DeviceNotFoundError, but use Exception as fallback
+            try:
+                from arena_api.system import DeviceNotFoundError
+                self.DeviceNotFoundError = DeviceNotFoundError
+            except ImportError:
+                # DeviceNotFoundError doesn't exist in this Arena SDK version
+                # Use generic Exception as fallback
+                self.DeviceNotFoundError = Exception
+                self.logger.warning(
+                    "DeviceNotFoundError not available in Arena SDK, using Exception fallback"
+                )
         except ImportError:
             raise ImportError(
                 "Arena SDK not available. Install Lucid Arena SDK from thinklucid.com"
@@ -628,6 +638,7 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
     def configure_camera(self) -> None:
         """
         Configure Lucid camera parameters including binning, ROI, and exposure.
+        Follows the exact sequence from original OpenHSI implementation.
 
         Raises:
             RuntimeError: If configuration fails
@@ -647,7 +658,6 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
                 "ExposureAuto",
                 "ExposureTime",
                 "Gain",
-                "GammaEnable",
                 "Height",
                 "OffsetX",
                 "OffsetY",
@@ -657,22 +667,26 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
             ]
             self.device_settings = self.device.nodemap.get_node(node_names)
 
-            # Set pixel format and binning
+            # Set pixel format and binning (must be done first)
             self.device_settings["BinningHorizontal"].value = self.settings["binxy"][0]
             self.device_settings["PixelFormat"].value = self.settings["pixel_format"]
 
-            # Reset to full frame
+            # Always reset to full frame before applying ROI (critical for avoiding errors)
             self.device_settings["OffsetY"].value = 0
             self.device_settings["OffsetX"].value = 0
             self.device_settings["Height"].value = self.device_settings["Height"].max
             self.device_settings["Width"].value = self.device_settings["Width"].max
+
+            self.logger.info(
+                f"Reset to full frame: {self.device_settings['Height'].value}x"
+                f"{self.device_settings['Width'].value}"
+            )
 
             # Apply ROI from settings
             self._apply_lucid_roi()
 
             # Configure exposure and gain
             self.device_settings["ExposureAuto"].value = "Off"
-            self.device_settings["GammaEnable"].value = False
             self.set_gain(0.0)
 
             self.rows = self.device_settings["Height"].value
@@ -689,12 +703,17 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
     def _apply_lucid_roi(self) -> None:
         """
         Apply ROI settings for Lucid camera.
-        Helper method to maintain function size limits.
+        Matches original OpenHSI implementation sequence.
+
+        Expected format from settings:
+            win_resolution: [height, width]
+            win_offset: [offset_y, offset_x]
         """
         win_res = self.settings["win_resolution"]
         win_off = self.settings["win_offset"]
 
-        # Set height and width
+        # Set height and width (dimensions before offsets)
+        # win_resolution[0] = height, win_resolution[1] = width
         self.device_settings["Height"].value = (
             win_res[0] if win_res[0] > 0 else self.device_settings["Height"].max
         )
@@ -702,12 +721,18 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
             win_res[1] if win_res[1] > 0 else self.device_settings["Width"].max
         )
 
-        # Set offsets
-        self.device_settings["OffsetY"].value = win_off[0] if win_off[0] > 0 else 0
-        self.device_settings["OffsetX"].value = win_off[1] if win_off[1] > 0 else 0
+        # Set offsets (must be done AFTER dimensions are set)
+        # win_offset[0] = offset_y, win_offset[1] = offset_x
+        # If offset is 0 or negative, keep it at 0 (not max!)
+        self.device_settings["OffsetY"].value = (
+            win_off[0] if win_off[0] > 0 else 0
+        )
+        self.device_settings["OffsetX"].value = (
+            win_off[1] if win_off[1] > 0 else 0
+        )
 
         self.logger.info(
-            f"Lucid ROI: {self.device_settings['Height'].value}x"
+            f"Lucid ROI applied: {self.device_settings['Height'].value}x"
             f"{self.device_settings['Width'].value} at offset "
             f"({self.device_settings['OffsetY'].value},"
             f"{self.device_settings['OffsetX'].value})"
@@ -1330,8 +1355,8 @@ class HyperspectralROS2Node(Node):
 
         # Get parameter values
         self.camera_type = self.get_parameter("camera_type").value.lower()
-        self.config_path = self.get_parameter("config_file").value
-        self.calibration_path = self.get_parameter("calibration_file").value
+        config_file = self.get_parameter("config_file").value
+        calibration_file = self.get_parameter("calibration_file").value
         self.processing_lvl = self.get_parameter("processing_lvl").value
         self.capture_frequency = self.get_parameter("cap_hz").value
         self.initial_exposure_ms = self.get_parameter("exposure_ms").value
@@ -1357,11 +1382,30 @@ class HyperspectralROS2Node(Node):
                 f"Invalid camera_type '{self.camera_type}'. Must be 'ximea' or 'lucid'"
             )
 
-        if not self.config_path:
+        if not config_file:
             raise ValueError("config_file parameter is required")
+
+        # Resolve config file path (support both absolute and relative paths)
+        if os.path.isabs(config_file):
+            self.config_path = config_file
+        else:
+            # Relative path - resolve from package share directory
+            package_share = get_package_share_directory('openhsi_ros2')
+            self.config_path = os.path.join(package_share, config_file)
 
         if not os.path.exists(self.config_path):
             raise FileNotFoundError(f"Config file not found: {self.config_path}")
+
+        # Resolve calibration file path (if provided)
+        if calibration_file:
+            if os.path.isabs(calibration_file):
+                self.calibration_path = calibration_file
+            else:
+                # Relative path - resolve from package share directory
+                package_share = get_package_share_directory('openhsi_ros2')
+                self.calibration_path = os.path.join(package_share, calibration_file)
+        else:
+            self.calibration_path = ""
 
         if self.capture_frequency <= 0:
             raise ValueError("cap_hz must be positive")
