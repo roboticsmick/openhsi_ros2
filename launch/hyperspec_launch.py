@@ -126,9 +126,10 @@ def generate_launch_description():
     # Set up Arena SDK environment variables for Lucid cameras
     arena_sdk_lib_path = os.path.join(arena_sdk_dir, "ArenaSDK", "lib64")
     arena_sdk_genicam_path = os.path.join(
-        arena_sdk_dir, "ArenaSDK", "GenICam", "library", "lib", "Linux64_ARM"
+        arena_sdk_dir, "ArenaSDK", "GenICam", "library", "lib", "Linux64_x64"
     )
     arena_sdk_ffmpeg_path = os.path.join(arena_sdk_dir, "ArenaSDK", "ffmpeg")
+    arena_sdk_metavision_path = os.path.join(arena_sdk_dir, "ArenaSDK", "Metavision", "lib")
 
     # Set environment variables (these will be set if Arena SDK is installed)
     ld_library_path = SetEnvironmentVariable(
@@ -139,6 +140,8 @@ def generate_launch_description():
             arena_sdk_genicam_path,
             ":",
             arena_sdk_ffmpeg_path,
+            ":",
+            arena_sdk_metavision_path,
             ":",
             os.environ.get("LD_LIBRARY_PATH", ""),
         ],
