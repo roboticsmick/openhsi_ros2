@@ -10,7 +10,6 @@ config/lucid_calibration/*.nc
 config/ximea_calibration/*.nc
 test/
 arena_sdk/
-docs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
