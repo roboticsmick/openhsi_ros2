@@ -62,6 +62,13 @@ from ament_index_python.packages import get_package_share_directory
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
 
+# Optional: Custom hyperspectral message (may not be available if openhsi_msgs not built)
+try:
+    from openhsi_msgs.msg import HyperspectralImage
+    HYPERSPECTRAL_MSG_AVAILABLE = True
+except ImportError:
+    HYPERSPECTRAL_MSG_AVAILABLE = False
+
 
 class AutoExposureController:
     """
@@ -782,8 +789,11 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
     def start_acquisition(self) -> None:
         """Start Lucid camera acquisition."""
         try:
-            self.device.start_stream(1)
-            self.logger.info("Lucid acquisition started")
+            # Use 10 buffers for continuous streaming to prevent blocking
+            # Single buffer (1) causes severe performance issues as the camera
+            # produces frames faster than ROS can consume them
+            self.device.start_stream(10)
+            self.logger.info("Lucid acquisition started with 10 buffers")
         except Exception as e:
             raise RuntimeError(f"Failed to start acquisition: {e}")
 
@@ -803,7 +813,9 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
             Tuple of (image_array, capture_timestamp) or (None, None) on failure
         """
         try:
-            image_buffer = self.device.get_buffer()
+            # Use 100ms timeout to prevent long blocking when buffer issues occur
+            # Default timeout can be 30+ seconds causing terrible frame rates
+            image_buffer = self.device.get_buffer(timeout=100)
             capture_time = time.time()
 
             # Process buffer based on bit depth
@@ -812,7 +824,9 @@ class LucidHyperspectralCamera(HyperspectralCameraBase):
             self.device.requeue_buffer(image_buffer)
             return nparray, capture_time
         except Exception as e:
-            self.logger.error(f"Failed to capture image: {e}")
+            # Don't spam logs on timeout - this is expected if camera isn't ready
+            if "timeout" not in str(e).lower():
+                self.logger.error(f"Failed to capture image: {e}")
             return None, None
 
     def _process_lucid_buffer(self, image_buffer) -> np.ndarray:
@@ -1244,6 +1258,12 @@ class HyperspectralROS2Node(Node):
         self.shape_warning_logged = False
         self.calibration_data = None
 
+        # Performance optimization: cache temperature and wavelengths
+        self._cached_temperature = 0.0
+        self._last_temperature_time = 0.0
+        self._temperature_cache_duration = 1.0  # Query temperature at most once per second
+        self._cached_wavelengths_list = None  # Pre-computed wavelengths list
+
         # Threading-related attributes
         self.use_threaded_capture = False
         self.frame_queue = None
@@ -1488,11 +1508,15 @@ class HyperspectralROS2Node(Node):
 
             self.camera.set_exposure(self.initial_exposure_ms)
 
-            # Get expected final shape after cropping
+            # Get expected final shape after cropping (and transpose if applicable)
+            # Check multiple field names for backwards compatibility
             self.final_shape_expected = tuple(
                 self.camera.settings.get(
-                    "final_image_shape_after_crop",
-                    self.camera.settings.get("resolution", [1024, 343]),
+                    "final_image_shape_after_crop_and_transpose",
+                    self.camera.settings.get(
+                        "final_image_shape_after_crop",
+                        self.camera.settings.get("resolution", [1024, 343]),
+                    ),
                 )
             )
 
@@ -1558,6 +1582,9 @@ class HyperspectralROS2Node(Node):
                     "Expected: 'headwall_*' parameters OR 'wavelength_array' OR "
                     "'wavelength_start_nm/wavelength_end_nm/num_spectral_bands'"
                 )
+
+            # Pre-cache wavelengths list to avoid tolist() on every publish
+            self._cached_wavelengths_list = self.wavelengths.tolist()
 
             self.get_logger().info(
                 f"Generated {len(self.wavelengths)} wavelengths: "
@@ -1674,6 +1701,19 @@ class HyperspectralROS2Node(Node):
             String, "hyperspec/auto_exposure_status", 10
         )
 
+        # Optional: Custom HyperspectralImage publisher (bundles image with wavelengths)
+        if HYPERSPECTRAL_MSG_AVAILABLE:
+            self.hyperspectral_pub = self.create_publisher(
+                HyperspectralImage, "hyperspec/hyperspectral_image", 10
+            )
+            self.get_logger().info("HyperspectralImage publisher enabled")
+        else:
+            self.hyperspectral_pub = None
+            self.get_logger().warn(
+                "openhsi_msgs not available - HyperspectralImage publisher disabled. "
+                "Build openhsi_msgs package to enable."
+            )
+
         # Subscribers
         self.exposure_sub = self.create_subscription(
             Float64, "hyperspec/set_exposure_ms", self.set_exposure_callback, 10
@@ -1764,11 +1804,34 @@ class HyperspectralROS2Node(Node):
         Returns:
             Tuple of (variance, mean, median)
         """
-        img_float = image.astype(np.float64)
-        variance = np.var(img_float)
+        # Use float32 instead of float64 for better performance
+        img_float = image.astype(np.float32)
+        # Calculate mean first (needed for variance anyway)
         mean = np.mean(img_float)
-        median = np.median(img_float)
+        # Variance is fast, keep it
+        variance = np.var(img_float)
+        # Skip expensive median calculation - use mean as approximation
+        # np.median() is O(n log n) due to sorting, significant overhead
+        median = mean  # Approximation - for auto-exposure, mean is sufficient
         return variance, mean, median
+
+    def _get_cached_temperature(self) -> float:
+        """
+        Get camera temperature with caching to avoid device I/O on every frame.
+
+        Temperature is queried at most once per second to reduce overhead.
+
+        Returns:
+            Cached or fresh temperature in degrees Celsius
+        """
+        current_time = time.time()
+        if current_time - self._last_temperature_time >= self._temperature_cache_duration:
+            try:
+                self._cached_temperature = self.camera.get_temperature()
+                self._last_temperature_time = current_time
+            except Exception:
+                pass  # Keep using cached value on error
+        return self._cached_temperature
 
     def create_camera_info_msg(self, header: Header) -> CameraInfo:
         """
@@ -1782,8 +1845,10 @@ class HyperspectralROS2Node(Node):
         """
         ci = CameraInfo()
         ci.header = header
-        ci.height = self.final_shape_expected[1]
-        ci.width = self.final_shape_expected[0]
+        # final_shape_expected is (spatial_rows, spectral_cols) after transpose
+        # ROS convention: height = rows, width = cols
+        ci.height = self.final_shape_expected[0]  # spatial (cross-track pixels)
+        ci.width = self.final_shape_expected[1]   # spectral (wavelength bands)
         ci.distortion_model = "plumb_bob"
         ci.d = [0.0, 0.0, 0.0, 0.0, 0.0]
         ci.k = [1.0, 0.0, ci.width / 2.0, 0.0, 1.0, ci.height / 2.0, 0.0, 0.0, 1.0]
@@ -1944,6 +2009,28 @@ class HyperspectralROS2Node(Node):
         image_msg.header = header
         self.image_pub.publish(image_msg)
 
+        # Publish HyperspectralImage (bundles image with wavelength calibration)
+        if self.hyperspectral_pub is not None:
+            hyper_msg = HyperspectralImage()
+            hyper_msg.header = header
+            hyper_msg.image = image_msg
+            # Use pre-cached list to avoid tolist() overhead on every frame
+            hyper_msg.wavelengths_nm = self._cached_wavelengths_list
+            hyper_msg.wavelength_start_nm = float(self.wavelengths[0])
+            hyper_msg.wavelength_end_nm = float(self.wavelengths[-1])
+            hyper_msg.pixel_dispersion_nm_px = float(
+                self.camera.settings.get("pixel_dispersion_nm_px", 1.75)
+            )
+            # Read axis_order from config (after transpose), default to spatial,spectral
+            hyper_msg.axis_order = self.camera.settings.get(
+                "axis_order_after_transpose",
+                self.camera.settings.get("axis_order", "spatial,spectral")
+            )
+            hyper_msg.exposure_ms = float(self.camera.settings["exposure_ms"])
+            # Use cached temperature to avoid device I/O on every frame
+            hyper_msg.sensor_temperature_c = float(self._get_cached_temperature())
+            self.hyperspectral_pub.publish(hyper_msg)
+
         # Publish camera info
         self.camera_info_pub.publish(self.create_camera_info_msg(header))
 
@@ -1962,9 +2049,9 @@ class HyperspectralROS2Node(Node):
         exposure_msg.data = self.camera.settings["exposure_ms"]
         self.exposure_ms_pub.publish(exposure_msg)
 
-        # Publish temperature
+        # Publish temperature (using cached value to avoid device I/O every frame)
         temp_msg = Float64()
-        temp_msg.data = self.camera.get_temperature()
+        temp_msg.data = self._get_cached_temperature()
         self.temperature_pub.publish(temp_msg)
 
     def capture_callback(self) -> None:
@@ -2132,7 +2219,12 @@ def main(args=None):
             node.destroy_node()
         if executor:
             executor.shutdown()
-        rclpy.shutdown()
+        # Guard against double shutdown (signal handler may have already called it)
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass  # Already shutdown
 
 
 if __name__ == "__main__":

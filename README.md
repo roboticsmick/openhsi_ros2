@@ -1,559 +1,586 @@
-# openhsi_ros2
+# OpenHSI ROS2
 
-Hyperspectral Imaging ROS2 library for line-scan hyperspectral cameras.
+ROS2 package for hyperspectral line-scan cameras. Publishes individual line scans as ROS2 topics for synchronized data logging and real-time visualization.
 
-This package supports two hyperspectral camera systems:
+## Supported Cameras
 
-- **Ximea** - USB 3.0 hyperspectral cameras (via OpenHSI)
-- **Lucid Vision** - GigE Vision hyperspectral line-scan cameras
+| Camera | Connection | SDK |
+|--------|------------|-----|
+| **Lucid Vision** (Phoenix series) | GigE Vision (Ethernet) | Arena SDK |
+| **XIMEA** (USB hyperspectral) | USB 3.0 | XIMEA API |
 
-## Prerequisites
+## Features
 
-- ROS2 (tested with Humble/Iron)
-- Ubuntu 22.04/24.04
-- Python 3.8+
+- Publishes hyperspectral line scans at configurable frame rates (up to 30+ Hz)
+- Wavelength calibration metadata bundled with each frame
+- Multiple processing levels (raw, flat-field, radiance)
+- Auto-exposure control with configurable thresholds
+- Real-time visualization in Foxglove Studio
+- Compatible with ROS2 bag recording for mission logging
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- **ROS2 Jazzy** (Ubuntu 24.04) or **ROS2 Humble** (Ubuntu 22.04)
+- Python 3.10+
+- Lucid Arena SDK or XIMEA API (see installation sections below)
+
+### 1. Clone and Build
+
+```bash
+cd /media/logic/USamsung/dai_ws/src
+git clone https://github.com/your-org/openhsi_ros2.git
+
+# Build the message package first (optional but recommended)
+cd /media/logic/USamsung/dai_ws
+colcon build --packages-select openhsi_msgs
+colcon build --packages-select openhsi_ros2
+source install/setup.bash
+```
+
+### 2. Run the Node
+
+```bash
+ros2 run openhsi_ros2 hyperspec_node --ros-args \
+    -p camera_type:=lucid \
+    -p config_file:=/media/logic/USamsung/dai_ws/src/openhsi_ros2/config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
+    -p processing_lvl:=0 \
+    -p cap_hz:=10.0 \
+    -p exposure_ms:=15.0
+```
+
+### 3. View in Foxglove
+
+```bash
+# Terminal 2: Start Foxglove bridge
+ros2 launch foxglove_bridge foxglove_bridge_launch.xml
+```
+
+Open Foxglove Studio, connect to `ws://localhost:8765`, and add:
+- **Image panel** → `/hyperspec/image_raw`
+- **Hypercube Waterfall panel** → `/hyperspec/image_raw` (see Visualization section)
 
 ---
 
-Your user needs to be part of the `plugdev` group to access USB devices without root:
+## ROS2 Topics
 
+| Topic | Type | Rate | Description |
+|-------|------|------|-------------|
+| `/hyperspec/image_raw` | sensor_msgs/Image | cap_hz | Line scan image (mono16) |
+| `/hyperspec/hyperspectral_image` | openhsi_msgs/HyperspectralImage | cap_hz | Image + wavelength metadata |
+| `/hyperspec/wavelengths` | std_msgs/Float64MultiArray | 1 Hz | Wavelength array (nm) |
+| `/hyperspec/camera_info` | sensor_msgs/CameraInfo | cap_hz | Camera calibration |
+| `/hyperspec/exposure_ms` | std_msgs/Float64 | cap_hz | Current exposure time |
+| `/hyperspec/temperature` | std_msgs/Float64 | 1 Hz | Sensor temperature (°C) |
+| `/hyperspec/exposure_info` | std_msgs/Float64MultiArray | cap_hz | [exposure, variance, mean, median] |
 
-## 1. Ximea Camera Setup
+### Image Dimensions
 
-This section covers installation and configuration for Ximea hyperspectral cameras using the OpenHSI library.
+After processing, image dimensions depend on `axis_order` in the config:
 
-### 1.1 Download XIMEA Linux Software Package
+**Lucid cameras** (after transpose, `axis_order: "spectral,spatial"`):
 
-Download the appropriate package for your CPU architecture. For Intel x86 (typically the "Beta" package):
+- **height** = spectral bands (e.g., 532 wavelengths)
+- **width** = spatial pixels (e.g., 448 cross-track pixels)
 
-```bash
-# Navigate to the XIMEA SDK directory
-cd "${PROJECT_ROOT}/api_sdks/ximea"
+**XIMEA cameras** (default, `axis_order: "spatial,spectral"`):
 
-# Download (replace URL if a newer version is available)
-wget https://updates.ximea.com/public/ximea_linux_sp_beta.tgz
+- **height** = spatial pixels (cross-track)
+- **width** = spectral bands (wavelengths)
 
-# Extract
-tar xzf ximea_linux_sp_beta.tgz
-# This should create a 'package' subdirectory (e.g., api_sdks/ximea/package/)
-```
+**Encoding**: `mono16` (16-bit unsigned, 0-65535 for Mono16, 0-4095 for Mono12)
 
-### 1.2 Install XIMEA API
+Each image represents one spatial line with full spectral information at each pixel.
 
-The XIMEA installer typically needs to be run with root privileges.
+### HyperspectralImage Message
 
-```bash
-# Navigate to the extracted package directory
-cd "${PROJECT_ROOT}/api_sdks/ximea/package/"
-
-# Run the installer
-sudo ./install
-```
-
-**Installation Notes:**
-
-- Follow the on-screen prompts
-- If `xiCamTool` (a XIMEA GUI tool) fails to launch, you might be missing Qt dependencies. For example, on Ubuntu: `sudo apt install libxcb-cursor0`
-- In some cases, disabling "Secure Boot" in the BIOS/UEFI settings can resolve driver or device recognition issues
-
-### 1.3 Configure USB 3.0 Support
-
-Your user needs to be part of the `plugdev` group to access USB devices without root:
-
-
-**Crucial for USB3 Cameras**
-
-#### 1.3.1 Check Kernel Version
-
-Ensure your Linux kernel is version 3.4 or newer:
-
-```bash
-uname -sr
-```
-
-#### 1.3.2 Add User to `plugdev` Group
-
-Your user needs to be part of the `plugdev` group to access USB devices without root:
-
-```bash
-# Check current groups
-groups $USER
-
-# Add user to plugdev group if not already a member
-sudo gpasswd -a $USER plugdev
-```
-
-**You will need to log out and log back in, or reboot, for this group change to take effect.**
-
-### 1.4 Configure Linux USB Data Path (Performance)
-
-These settings improve data streaming reliability.
-
-#### 1.4.1 Increase USBFS Memory Buffer
-
-**Temporary (for testing):**
-
-```bash
-sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb >/dev/null <<<0
-```
-
-**Permanent (recommended):**
-
-Create `/etc/rc.local`:
-
-```bash
-#!/bin/sh -e
-# USB Buffer size for hyperspectral camera
-echo 0 > /sys/module/usbcore/parameters/usbfs_memory_mb
-exit 0
-```
-
-Save and make executable:
-
-```bash
-sudo chmod +x /etc/rc.local
-```
-
-**Note:** A value of `0` often means "unlimited" or a very large system-dependent default. Some XIMEA guides suggest `2000` or more if `0` is problematic. Test what works for your system.
-
-**Symptom if not set correctly:** Error code 13 during `startAcquisition()`.
-
-#### 1.4.2 Allow Applications Realtime Priority
-
-Edit `/etc/security/limits.conf`:
-
-```bash
-sudo nano /etc/security/limits.conf
-```
-
-Add these lines:
+The custom `openhsi_msgs/HyperspectralImage` bundles the image with wavelength calibration:
 
 ```
-*              -       rtprio          0
-@realtime      -       rtprio          81
-*              -       nice            0
-@realtime      -       nice            -16
-```
-#net.ipv4.conf.default.rp_filter=2
-#net.ipv4.conf.all.rp_filter=2
-```
-
-Create the `realtime` group and add your user:
-
-```bash
-sudo groupadd realtime
-sudo gpasswd -a $USER realtime
+std_msgs/Header header
+sensor_msgs/Image image
+float64[] wavelengths_nm        # Wavelength for each spectral band
+float64 wavelength_start_nm     # First wavelength (e.g., 426.07)
+float64 wavelength_end_nm       # Last wavelength (e.g., 897.69)
+float64 pixel_dispersion_nm_px  # Wavelength spacing per pixel (e.g., 0.895)
+string axis_order               # "spectral,spatial" or "spatial,spectral"
+float64 exposure_ms
+float64 sensor_temperature_c
 ```
 
-**Re-login or reboot for these changes to apply.**
+**Important**: The `axis_order` field tells subscribers how to interpret the image:
 
-### 1.5 XIMEA API Buffer Configuration (In Code)
-
-The OpenHSI `XimeaCamera` class usually handles these settings internally based on its configuration. The following are examples of xiAPI calls that can be made to optimize buffer handling:
-
-```c++
-// Example C API calls, OpenHSI Python wrapper would use equivalent methods
-// xiSetParamInt(handle, XI_PRM_ACQ_TRANSPORT_BUFFER_COMMIT, 32);
-// xiGetParamInt(handle, XI_PRM_ACQ_TRANSPORT_BUFFER_SIZE XI_PRM_INFO_MAX, &buffer_size);
-// xiSetParamInt(handle, XI_PRM_ACQ_TRANSPORT_BUFFER_SIZE, buffer_size);
-```
+- `"spectral,spatial"` → rows are wavelengths, columns are spatial pixels
+- `"spatial,spectral"` → rows are spatial pixels, columns are wavelengths
 
 ---
-#net.ipv4.conf.default.rp_filter=2
-#net.ipv4.conf.all.rp_filter=2
-```
 
-## 2. Lucid Vision Camera Setup
+## Node Parameters
 
-This section covers installation and configuration for Lucid Vision GigE hyperspectral line-scan cameras using the Arena SDK.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `camera_type` | string | `ximea` | Camera type: `lucid` or `ximea` |
+| `config_file` | string | - | Path to camera configuration JSON |
+| `calibration_file` | string | `""` | Path to calibration NetCDF file |
+| `processing_lvl` | int | `0` | Processing level (see below) |
+| `cap_hz` | float | `10.0` | Capture rate in Hz |
+| `exposure_ms` | float | `10.0` | Initial exposure time (ms) |
+| `serial_number` | string | `""` | Camera serial (XIMEA) or MAC (Lucid) |
+| `auto_exposure_enable` | bool | `false` | Enable auto-exposure |
+| `auto_exposure_low_threshold` | float | `500.0` | Min signal for exposure increase |
+| `auto_exposure_high_threshold` | float | `3000.0` | Max signal for exposure decrease |
 
-### 2.1 Install Arena SDK
+### Processing Levels
 
-The installation process differs based on your system architecture. Choose the appropriate section below.
+| Level | Name | Description | Data Type |
+|-------|------|-------------|-----------|
+| 0 | Raw | Digital numbers from sensor | uint16 |
+| 1 | Dark-subtracted | Dark current removed | uint16 |
+| 2 | Flat-field | Pixel sensitivity corrected | float32 |
+| 3 | Radiance | Calibrated to μW/cm²/sr/nm | float32 |
 
-#### 2.1.1 Determine Your System Architecture
+---
 
-Check your system architecture:
+## Visualization
 
-```bash
-uname -m
-```
+### Foxglove Hypercube Waterfall Panel
 
-- `x86_64` → Use the **x64 installation** (Section 2.1.2)
-- `aarch64` or `arm64` → Use the **ARM installation** (Section 2.1.3)
+A custom Foxglove extension for visualizing hyperspectral data as an RGB waterfall.
 
-#### 2.1.2 x64 Installation (Ubuntu Desktop/Laptop)
+**Features:**
 
-**Download the required files** from [Lucid Vision Labs Downloads](https://thinklucid.com/downloads-hub/) and save to `~/Downloads`:
+- RGB composite from selectable wavelength bands
+- Multiple presets: visible, vegetation, coral, water
+- Click on waterfall to view spectrum at any point
+- Real-time scrolling waterfall display
+- Automatic wavelength calibration from HyperspectralImage message
+- Supports both Lucid and XIMEA axis orders
 
-1. **Arena SDK Linux x64** - `ArenaSDK_v0.1.104_Linux_x64.tar.gz`
-   - Look for: *Arena SDK - x64 Ubuntu 18.04/20.04/22.04/24.04, 64-bit*
-2. **Arena Python Package** - `arena_api-2.7.1-py3-none-any.zip`
-
-**Run the x64 installation script:**
-
-```bash
-cd /media/logic/USamsung/ros2_ws/src/openhsi_ros2
-./install_arena_sdk_x64.sh
-```
-
-#### 2.1.3 ARM Installation (Jetson Orin NX/AGX)
-
-**Download the required files** from [Lucid Vision Labs Downloads](https://thinklucid.com/downloads-hub/) and save to `~/Downloads`:
-
-1. **Arena SDK Linux ARM64** - `ArenaSDK_v0.1.78_Linux_ARM64.tar.gz`
-   - Look for: *Arena SDK - ARM Ubuntu 22.04/24.04, 64-bit for Jetson Orin NX with JetPack 6.2*
-2. **Arena Python Package** - `arena_api-2.7.1-py3-none-any.zip`
-
-**Run the ARM installation script:**
+**Installation:**
 
 ```bash
-cd /media/logic/USamsung/ros2_ws/src/openhsi_ros2
-./install_arena_sdk_ARM.sh
+cd foxglove-hypercube-panel
+npm install
+npm run package
 ```
 
-#### 2.1.4 Uninstalling Arena SDK
+In Foxglove: **Settings** → **Extensions** → **Install local extension** → select the `.foxe` file.
 
-#net.ipv4.conf.default.rp_filter=2
-#net.ipv4.conf.all.rp_filter=2
-```
-If you need to remove an existing installation (e.g., to switch architectures):
+**Configuration (Recommended - Combined Message Mode):**
+
+- ☑️ **Combined msg** checkbox enabled
+- **Topic**: `/hyperspec/hyperspectral_image`
+- Wavelengths and axis_order are read automatically from the message
+
+**Configuration (Legacy - Separate Topics Mode):**
+
+- ☐ **Combined msg** checkbox disabled
+- **Image Topic**: `/hyperspec/image_raw`
+- **WL Topic**: `/hyperspec/wavelengths`
+
+**RGB Presets:**
+
+| Preset | Red | Green | Blue | Use Case |
+|--------|-----|-------|------|----------|
+| visible | 650nm | 550nm | 470nm | Natural color |
+| vegetation | 800nm | 670nm | 550nm | Plant health (NIR) |
+| water | 560nm | 490nm | 440nm | Water column |
+| coral | 680nm | 570nm | 480nm | Coral pigmentation |
+| custom | user | user | user | Custom wavelengths |
+
+---
+
+## Lucid Camera Installation
+
+### Lucid Camera Datasheet
+
+| Parameter | Design Goal | Notes |
+|---|---|---|
+| Input Aperture | 4mm |  |
+| Field Lens Focal Length | 16mm |  |
+| Sensor Size | 1440 x 1080 px, 1.6 MP | Only a 1080 pixel square area is required. |
+| Pixel Size | 3.45µm |  |
+| FOV | 10.7◦ |  |
+| iFOV (along and across-track) | approx. 2 milli-radians (0.1◦ ) | along-track, limited by slit width. |
+| Spatial Samples | >800 | slit image length divided by pixel size, binning and image quality my reduce effective samples. |
+| Spectrograph Slit Size (Physical) | 3mm by 25µm |  |
+| Slit Image Size on sensor | 3.1mm by 25.9µm | M=1.035 |
+| Spectral Sampling Interval | 0.45 nm | nm per pixel |
+| Band Size | 3.3 nm | 7.5 pixel across slit, corresponds to slit width, ie pixel that need to be binned |
+| Wavelength Range | 430 nm to 900 nm | spatial resolution will be de- graded blue of 500nm, and be- yond 850nm. |
+| Number of Bands | approx 144 |  |
+| Typical Exposure Time. | 10ms |  |
+| Signal to Noise estimate | > 150 (430nm to 660nm) > 90 (680nm to 800nm) | 10ms exposure, estimated using 6SV solar illumination, Mid lati- tude Summer, nadir pointing and including detector QE |
+| Size (L x W x H) | 35mm x 52mm x 35mm | Enclosing rectangle |
+| Camera Sensor Model | Phoenix 1.6 MP Model | https://thinklucid.com/ product/phoenix-16-mp- imx273/ |
+| Weight | < 200g without enclosure |  |
+| Digital Interface | 1000BASE-T RJ45, PoE ix Industrial, PoE |  |
+| Power Requirement | PoE (IEEE 802.3af), or 12-24 VDC external | external via GPIO port, cable not provided. |
+| Power Consumption | 3.1W via PoE, 2.5W when powered externally |  |
+
+### 1. Install Arena SDK
+
+Download from [Lucid Vision Downloads](https://thinklucid.com/downloads-hub/):
+- **ArenaSDK_v0.1.104_Linux_x64.tar.gz** (or ARM64 for Jetson)
+- **arena_api-2.7.1-py3-none-any.zip**
 
 ```bash
-cd /media/logic/USamsung/ros2_ws/src/openhsi_ros2
-./uninstall_arena_sdk.sh
+# Run the installation script
+cd /media/logic/USamsung/dai_ws/src/openhsi_ros2
+./install_arena_sdk_x64.sh  # or install_arena_sdk_ARM.sh for Jetson
 ```
 
-**Documentation:** [Arena SDK Documentation](https://support.thinklucid.com/arena-sdk-documentation/)
-
-### 2.2 Configure Ethernet Adapter
-
-GigE Vision cameras require specific network configuration for optimal performance.
-
-#### 2.2.1 Set Up Link-Local Address (LLA)
-
-Configure a static IP address in the 169.254.x.x range:
-
-##### Option A: Using GUI (Desktop with Display)
-
-1. Navigate to **Settings → Network → Ethernet → IPv4**
-2. Select the **IPv4 Settings** tab
-3. Choose **Manual** for Method
-4. In the **Addresses** heading, click **Add** and enter:
-
-| Field | Value |
-|-------|-------|
-| IP Address | 169.254.0.1 |
-| Subnet Mask | 255.255.0.0 |
-
-5. Click **Apply**
-
-##### Option B: Using SSH/Command Line
+### 2. Configure GigE Network
 
 ```bash
-# First, identify your ethernet interface and existing connection
-nmcli device status
-nmcli connection show
-
-# Configure the ethernet connection (replace "Wired connection 1" and "eno1" with your actual connection name and interface)
+# Configure Link-Local Address (replace "Wired connection 1" with your connection name)
 sudo nmcli connection modify "Wired connection 1" \
-  connection.interface-name eno1 \
-  ipv4.method manual \
-  ipv4.addresses 169.254.0.1/16 \
-  ipv4.gateway ""
+    ipv4.method manual \
+    ipv4.addresses 169.254.0.1/16 \
+    802-3-ethernet.mtu 9000
 
-# Activate the connection
 sudo nmcli connection up "Wired connection 1"
 
-# Verify the configuration
-nmcli connection show "Wired connection 1" | grep ipv4
-```
-
-#### 2.2.2 Enable Jumbo Frames
-
-Jumbo frames improve throughput for high-bandwidth GigE cameras:
-
-##### Option A: Using GUI (Desktop with Display)
-
-1. Navigate to **Settings → Network → Ethernet → Identity**
-2. Change **MTU** to **9000**
-3. Click **Apply**
-
-##### Option B: Using SSH/Command Line
-
-```bash
-# Add MTU 9000 to the existing connection configuration
-sudo nmcli connection modify "Wired connection 1" \
-  802-3-ethernet.mtu 9000
-
-# Reactivate the connection to apply changes
-sudo nmcli connection down "Wired connection 1"
-sudo nmcli connection up "Wired connection 1"
-
-# Verify MTU is set to 9000
-ip addr show eno1 | grep mtu
-```
-
-**Expected output:**
-#net.ipv4.conf.default.rp_filter=2
-#net.ipv4.conf.all.rp_filter=2
-```
-```
-4: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 qdisc mq state UP group default qlen 1000
-```
-
-#### 2.2.3 Adjust Receive Buffer Size
-
-**Check maximum RX buffer size:**
-
-```bash
-# Find your ethernet interface name (e.g., eth0, eno1, enp0s31f6, etc.)
-ip link show | grep mtu
-
-# Check current and maximum ring buffer settings (replace eno1 with your interface)
-sudo ethtool -g eno1
-```
-
-Example output:
-
-```
-Ring parameters for eno1:
-#net.ipv4.conf.default.rp_filter=2
-#net.ipv4.conf.all.rp_filter=2
-```
-Pre-set maximums:
-RX:         1024
-RX Mini:    n/a
-RX Jumbo:   n/a
-TX:         1024
-Current hardware settings:
-RX:         256
-RX Mini:    n/a
-RX Jumbo:   n/a
-TX:         256
-```
-
-**Set RX buffer to maximum:**
-
-```bash
-# Replace eth0 with your interface and 1024 with your maximum RX value
-sudo ethtool -G eno1 rx 1024
-
-# Verify the change
-sudo ethtool -g eno1
-```
-
-**Make permanent (using systemd):**
-
-Create a systemd service to set the buffer size on boot:
-
-```bash
-sudo nano /etc/systemd/system/set-ethernet-buffers.service
-```
-
-Add the following content (replace `eno1` and `1024` with your values):
-
-```ini
-[Unit]
-Description=Set Ethernet RX Buffer Size for GigE Camera
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/ethtool -G eno1 rx 1024
-RemainAfterExit=yes
-
-#net.ipv4.conf.default.rp_filter=2
-#net.ipv4.conf.all.rp_filter=2
-```
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable the service:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable set-ethernet-buffers.service
-sudo systemctl start set-ethernet-buffers.service
-```
-
-#### 2.2.4 Set Socket Buffer Size
-
-Increase the receive buffer sizes for the network stack:
-
-```bash
-sudo sh -c "echo 'net.core.rmem_default=1048576' >> /etc/sysctl.conf"
-sudo sh -c "echo 'net.core.rmem_max=1048576' >> /etc/sysctl.conf"
+# Increase socket buffers
+sudo sh -c "echo 'net.core.rmem_default=33554432' >> /etc/sysctl.conf"
+sudo sh -c "echo 'net.core.rmem_max=33554432' >> /etc/sysctl.conf"
 sudo sysctl -p
 ```
 
-These changes are automatically permanent.
-
-#### 2.2.5 Configure Reverse Path Filtering
-
-Disable reverse path filtering for GigE Vision cameras:
-
-**Temporary (for testing):**
+### 3. Verify Camera Detection
 
 ```bash
-sudo sysctl -w net.ipv4.conf.default.rp_filter=0
-sudo sysctl -w net.ipv4.conf.all.rp_filter=0
-sudo sysctl -w net.ipv4.conf.eno1.rp_filter=0  # Replace eth0 with your interface
-```
-
-**Make permanent:**
-
-Edit the network security configuration:
-
-```bash
-sudo vim /etc/sysctl.d/10-network-security.conf
-```
-
-Comment out the following lines by adding `#` at the beginning:
-
-```
-# Turn on Source Address Verification in all interfaces to
-# prevent some spoofing attacks
-#net.ipv4.conf.default.rp_filter=2
-#net.ipv4.conf.all.rp_filter=2
-```
-
-Apply the changes:
-
-```bash
-sudo sysctl -p /etc/sysctl.d/10-network-security.conf
+python3 -c "
+from arena_api.system import system
+devices = system.create_device()
+print(f'Found {len(devices)} camera(s)')
+for d in devices:
+    print(f'  - {d.nodemap.get_node(\"DeviceModelName\").value}')
+    system.destroy_device(d)
+"
 ```
 
 ---
 
-## 3. Package Configuration
+## XIMEA Camera Installation
 
-### 3.1 Camera Configuration Files
-
-Camera-specific settings and calibration files are organized by camera type in the `config/` directory:
-
-**Lucid Camera:**
-- `config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json` - Camera settings (crop size, exposure, etc.)
-- `config/lucid_calibration/*.nc` - Calibration data files (NetCDF format)
-
-**Ximea Camera:**
-- `config/ximea_calibration/cam_settings_ximea_MVCV-1082.json` - Camera settings
-- `config/ximea_calibration/*.nc` - Calibration data files (NetCDF format)
-
-### 3.2 Calibration File Format
-
-Calibration data is stored in NetCDF format (`.nc` files).
-
-**Calibration file structure:**
-- `wavelengths` - Wavelength array (nm) for each pixel
-- `flat_field_pic` - Flat field reference image for pixel sensitivity correction
-- `smile_shifts` - Smile distortion correction data
-- `rad_ref` - 4D radiance reference cube (cross_track × wavelength × exposure × luminance)
-- `sfit_x`, `sfit_y` - Spectral radiance interpolation function
-- `HgAr_pic` - HgAr calibration spectrum
-
-**Creating calibration files:**
-
-See [config/lucid_calibration/CALIBRATION_TUTORIAL.md](config/lucid_calibration/CALIBRATION_TUTORIAL.md) for detailed calibration procedures.
-
-### 3.3 Install Python Dependencies
-
-The calibration system requires xarray and netcdf4:
+### 1. Install XIMEA API
 
 ```bash
-pip3 install xarray netcdf4 scipy --break-system-packages
+cd ~/Downloads
+wget https://updates.ximea.com/public/ximea_linux_sp_beta.tgz
+tar xzf ximea_linux_sp_beta.tgz
+cd package
+sudo ./install
 ```
 
-### 3.4 Running the Hyperspectral Node
-
-#### Basic Usage (No Calibration)
+### 2. Configure USB Permissions
 
 ```bash
-# Source your ROS2 workspace
-source /media/logic/USamsung/ros2_ws/install/setup.bash
+# Add user to plugdev group
+sudo gpasswd -a $USER plugdev
 
-# Run with Ximea camera (raw data)
-ros2 run openhsi_ros2 hyperspec_node --ros-args \
-    -p camera_type:=ximea \
-    -p config_file:=config/ximea_calibration/cam_settings_ximea_MVCV-1082.json \
-    -p processing_lvl:=0 \
-    -p cap_hz:=10.0 \
-    -p exposure_ms:=10.0
-
-# Run with Lucid camera (raw data)
-ros2 run openhsi_ros2 hyperspec_node --ros-args \
-    -p camera_type:=lucid \
-    -p config_file:=config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
-    -p processing_lvl:=0 \
-    -p cap_hz:=10.0 \
-    -p exposure_ms:=15.0
+# Increase USB buffer (permanent)
+echo '#!/bin/sh -e
+echo 0 > /sys/module/usbcore/parameters/usbfs_memory_mb
+exit 0' | sudo tee /etc/rc.local
+sudo chmod +x /etc/rc.local
 ```
 
-#### With Calibration (Lucid Camera)
+Log out and back in for group changes to take effect.
 
-```bashcam_settings_lucid.json
-# Flat-field corrected data (processing_lvl=2)
-ros2 run openhsi_ros2 hyperspec_node --ros-args \
-    -p camera_type:=lucid \
-    -p config_file:=config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
-    -p calibration_file:=config/lucid_calibration/OpenHSI-06_calibration_Mono12_bin1.nc \
-    -p processing_lvl:=2 \
-    -p cap_hz:=10.0 \
-    -p exposure_ms:=15.0
+---
 
-# Spectral radiance data (processing_lvl=3)
-ros2 run openhsi_ros2 hyperspec_node --ros-args \
-    -p camera_type:=lucid \
-    -p config_file:=config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
-    -p calibration_file:=config/lucid_calibration/OpenHSI-06_calibration_Mono12_bin1.nc \
-    -p processing_lvl:=3 \
-    -p cap_hz:=10.0 \
-    -p exposure_ms:=15.0
+## Camera Configuration Guide
+
+This section explains how to create a camera configuration JSON file for any hyperspectral pushbroom camera.
+
+### Understanding Pushbroom Camera Geometry
+
+A pushbroom hyperspectral camera captures a single **spatial line** at a time, with each pixel in that line containing a full **spectrum**:
+
+```
+┌────────────────────────────────────────────────────┐
+│                    SENSOR ARRAY                    │
+│                                                    │
+│  ◄──────────── Spectral Axis (wavelengths) ──────► │
+│                                                    │
+│  ▲  ┌────┬────┬────┬────┬────┬────┬────┬────┐      │
+│  │  │ λ₁ │ λ₂ │ λ₃ │ λ₄ │ λ₅ │ ...│λₙ₋₁│ λₙ │ ← Pixel 0 (spatial)
+│  │  ├────┼────┼────┼────┼────┼────┼────┼────┤      │
+│  S  │ λ₁ │ λ₂ │ λ₃ │ λ₄ │ λ₅ │ ...│λₙ₋₁│ λₙ │ ← Pixel 1
+│  p  ├────┼────┼────┼────┼────┼────┼────┼────┤      │
+│  a  │ .. │ .. │ .. │ .. │ .. │ .. │ .. │ .. │      │
+│  t  ├────┼────┼────┼────┼────┼────┼────┼────┤      │
+│  i  │ λ₁ │ λ₂ │ λ₃ │ λ₄ │ λ₅ │ ...│λₙ₋₁│ λₙ │ ← Pixel N (spatial)
+│  a  └────┴────┴────┴────┴────┴────┴────┴────┘      │
+│  l                                                 │
+│  ▼                                                 │
+└────────────────────────────────────────────────────┘
 ```
 
-#### Processing Levels
+**Key Terminology:**
+- **Spatial pixels**: Cross-track pixels (perpendicular to flight direction)
+- **Spectral bands**: Wavelength channels (e.g., 426nm, 427nm, 428nm, ...)
+- **axis_order**: Describes which image dimension is spatial vs spectral
 
-| Level | Description | Output Data Type |
-|-------|-------------|------------------|
-| `0` | **Raw** - Digital numbers from sensor (no corrections) | uint16 |
-| `1` | **Dark-subtracted** - Dark current removed (not yet implemented) | uint16 |
-| `2` | **Flat-field corrected** - Pixel sensitivity variations removed | float32 |
-| `3` | **Spectral radiance** - Calibrated to μW/cm²/sr/nm | float32 |
-| `4` | **Reflectance** - Requires reference panel (not yet implemented) | float32 |
+### Axis Order Explained
 
-**Recommended settings:**
-- **Raw data collection**: `processing_lvl:=0` - Save raw data for later processing
-- **Real-time visualization**: `processing_lvl:=2` - Flat-fielded data shows features clearly
-- **Scientific analysis**: `processing_lvl:=3` - Calibrated radiance for quantitative analysis
+The `axis_order` field tells visualization tools how to interpret the image dimensions:
+
+| axis_order | Image Layout | Use Case |
+|------------|--------------|----------|
+| `"spatial,spectral"` | rows=spatial, cols=spectral | XIMEA default, some Lucid modes |
+| `"spectral,spatial"` | rows=spectral, cols=spatial | Lucid after transpose |
+
+**Example:** For a 448×532 image with `axis_order: "spectral,spatial"`:
+- 448 rows = spectral bands (wavelengths)
+- 532 columns = spatial pixels (cross-track)
+
+### Configuration File Reference
+
+#### Complete Example (Lucid Camera)
+
+```json
+{
+    "camera_type": "lucid",
+    "camera_id": "OpenHSI-06",
+    "pixel_format": "Mono12",
+    "binxy": [2, 2],
+
+    "win_resolution": [464, 532],
+    "win_offset": [42, 76],
+
+    "row_slice": [7, 455],
+
+    "crop_offset_y": 7,
+    "crop_offset_x": 0,
+    "crop_height": 448,
+    "crop_width": 532,
+
+    "exposure_ms": 8.417,
+
+    "wavelength_start_nm": 426.07,
+    "wavelength_end_nm": 897.69,
+    "num_spectral_bands": 532,
+    "num_spatial_pixels": 448,
+    "pixel_dispersion_nm_px": 0.895,
+
+    "fwhm_nm": 4,
+
+    "final_image_shape_after_crop_and_transpose": [532, 448],
+    "resolution": [448, 532],
+
+    "axis_order_before_transpose": "spatial,spectral",
+    "axis_order_after_transpose": "spectral,spatial",
+
+    "exposure_presets_ms": [
+        5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 18.0, 20.0, 25.0, 30.0, 40.0, 50.0
+    ],
+
+    "camera_notes": "Description of camera setup and calibration",
+    "calibration_file": "OpenHSI-06_calibration_Mono12_bin2_window.nc",
+    "calibration_date": "2021-05-26",
+    "operator": "OpenHSI"
+}
+```
+
+#### Field Descriptions
+
+##### Camera Identification
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `camera_type` | string | `"lucid"` or `"ximea"` |
+| `camera_id` | string | Unique identifier (e.g., `"OpenHSI-06"`) |
+| `pixel_format` | string | Sensor pixel format (`"Mono12"`, `"Mono16"`) |
+
+##### Hardware Configuration
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `binxy` | [int, int] | Hardware binning [rows, cols] (e.g., `[2, 2]` for 2×2) |
+| `win_resolution` | [int, int] | ROI size [height, width] in pixels |
+| `win_offset` | [int, int] | ROI offset [y, x] from sensor origin |
+
+##### Software Cropping
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `row_slice` | [int, int] | Valid row range [start, end] for spectral extraction |
+| `crop_offset_y` | int | Y offset for final crop (pixels) |
+| `crop_offset_x` | int | X offset for final crop (pixels) |
+| `crop_height` | int | Final image height after crop |
+| `crop_width` | int | Final image width after crop |
+
+##### Wavelength Calibration (Critical!)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `wavelength_start_nm` | float | First wavelength in spectrum (nm) |
+| `wavelength_end_nm` | float | Last wavelength in spectrum (nm) |
+| `num_spectral_bands` | int | Number of spectral channels |
+| `num_spatial_pixels` | int | Number of cross-track pixels |
+| `pixel_dispersion_nm_px` | float | Wavelength change per pixel (nm/px) |
+| `fwhm_nm` | float | Full-width half-maximum spectral resolution (nm) |
+
+##### Output Shape & Axis Order
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `resolution` | [int, int] | Output shape before transpose [height, width] |
+| `final_image_shape_after_crop_and_transpose` | [int, int] | Final output shape [height, width] |
+| `axis_order_before_transpose` | string | Axis interpretation before transpose |
+| `axis_order_after_transpose` | string | Axis interpretation after transpose (used by Foxglove) |
+
+##### Exposure Settings
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `exposure_ms` | float | Default exposure time (milliseconds) |
+| `exposure_presets_ms` | float[] | Auto-exposure preset values |
+
+##### Metadata
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `camera_notes` | string | Human-readable description |
+| `calibration_file` | string | Reference to calibration NetCDF file |
+| `calibration_date` | string | Date of calibration |
+| `operator` | string | Person/organization who performed calibration |
+
+### Creating a Config from Calibration Data
+
+If you have a calibration NetCDF file (`.nc`), extract the wavelength parameters:
+
+```python
+import xarray as xr
+
+# Open calibration file
+ds = xr.open_dataset("calibration.nc")
+
+# Extract wavelength array
+wavelengths = ds["wavelengths"].values
+print(f"wavelength_start_nm: {wavelengths[0]:.2f}")
+print(f"wavelength_end_nm: {wavelengths[-1]:.2f}")
+print(f"num_spectral_bands: {len(wavelengths)}")
+print(f"pixel_dispersion_nm_px: {(wavelengths[-1] - wavelengths[0]) / (len(wavelengths) - 1):.3f}")
+
+# Check for spatial dimension
+if "smile_shifts" in ds:
+    print(f"num_spatial_pixels: {len(ds['smile_shifts'])}")
+
+ds.close()
+```
+
+### XIMEA vs Lucid Differences
+
+| Feature | XIMEA | Lucid |
+|---------|-------|-------|
+| Connection | USB 3.0 | GigE Vision |
+| Default axis_order | `spatial,spectral` | `spectral,spatial` (after transpose) |
+| Typical format | Mono16 | Mono12 |
+| Binning | Software | Hardware |
+
+---
+
+## Recording and Playback
+
+### Record a ROS2 Bag
+
+```bash
+ros2 bag record /hyperspec/image_raw /hyperspec/wavelengths /hyperspec/camera_info \
+    -o hyperspectral_mission
+```
+
+### Playback with Foxglove
+
+```bash
+# Terminal 1: Play bag
+ros2 bag play hyperspectral_mission --loop
+
+# Terminal 2: Foxglove bridge
+ros2 launch foxglove_bridge foxglove_bridge_launch.xml
+```
+
+Open Foxglove and connect to `ws://localhost:8765`.
 
 ---
 
 ## Troubleshooting
 
-### Ximea Camera Issues
+### Lucid Camera Not Detected
 
-- **Error code 13 during acquisition:** Check USBFS memory buffer settings (Section 1.4.1)
-- **Camera not detected:** Verify user is in `plugdev` group and Secure Boot is disabled
-- **xiCamTool fails to launch:** Install Qt dependencies: `sudo apt install libxcb-cursor0`
+1. Check network configuration: `ip addr show` should show 169.254.x.x
+2. Verify MTU: `ip link show` should show `mtu 9000`
+3. Run `sudo ldconfig` after SDK installation
+4. Try disabling reverse path filtering:
+   ```bash
+   sudo sysctl -w net.ipv4.conf.all.rp_filter=0
+   ```
 
-### Lucid Camera Issues
+### Frame Drops / Slow Rate
 
-- **Camera not discovered:** Verify Link-Local Address configuration and firewall settings
-- **Dropped frames:** Increase RX buffer size and ensure jumbo frames are enabled
-- **Slow frame rate:** Check MTU is set to 9000 and socket buffer sizes are configured
+1. Increase socket buffers:
+
+   ```bash
+   sudo sysctl -w net.core.rmem_max=67108864
+   ```
+
+2. Check RX ring buffer:
+
+   ```bash
+   sudo ethtool -g <interface>
+   sudo ethtool -G <interface> rx 1024
+   ```
+
+### XIMEA Error Code 13
+
+Increase USB buffer size (see XIMEA installation section).
+
+### OpenCV Import Error After Arena SDK Install
+
+The Arena SDK may conflict with system OpenCV on Ubuntu 24.04. Run:
+
+```bash
+./install_arena_sdk_x64.sh  # Includes fix for Metavision library conflicts
+```
 
 ---
 
-## Additional Resources
+## Directory Structure
 
-- [XIMEA Linux Software Package](https://www.ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package)
-- [Lucid Vision Arena SDK Documentation](https://support.thinklucid.com/arena-sdk-documentation/)
-- [OpenHSI Documentation](https://github.com/openHSI)
-- [GigE Vision Performance Optimization](https://support.thinklucid.com/knowledgebase/optimizing-gige-vision-performance/)
+```bash
+openhsi_ros2/
+├── openhsi_ros2/
+│   └── hyperspec_node.py      # Main ROS2 node
+├── config/
+│   ├── lucid_calibration/     # Lucid camera configs
+│   └── ximea_calibration/     # XIMEA camera configs
+├── arena_sdk/                 # Lucid Arena SDK (after install)
+├── launch/
+│   └── hyperspec_launch.py    # Launch file
+├── install_arena_sdk_x64.sh   # x64 SDK installer
+├── install_arena_sdk_ARM.sh   # ARM64 SDK installer
+└── README.md
+```
+
+---
+
+## Related Packages
+
+- **openhsi_msgs** - Custom ROS2 messages for hyperspectral data
+- **foxglove-hypercube-panel** - Foxglove extension for waterfall visualization
 
 ---
 
 ## License
 
-[Add your license information here]
+MIT License
+
+## Author
+
+Michael Venz

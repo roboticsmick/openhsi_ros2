@@ -77,16 +77,99 @@ unzip -q "${API_ARCHIVE}" -d "${SDK_INSTALL_DIR}/ArenaAPI"
 echo -e "${GREEN}API extracted to: ${SDK_INSTALL_DIR}/ArenaAPI${NC}"
 
 # Install SDK libraries (requires sudo)
+# NOTE: We do NOT run the bundled Arena_SDK_ARM64.conf script because it adds
+# all of Metavision/lib to the system ldconfig without filtering. The Metavision/lib
+# directory contains ~100 third-party libraries compiled for Ubuntu 22.04 that depend
+# on libldap-2.5.so.0, libgeos, libgdal, etc. These conflict with Ubuntu 24.04 system
+# libraries and break python3-opencv and other packages.
+#
+# However, libarena.so depends on libmetavision_sdk_core.so, which in turn requires
+# the bundled OpenCV 4.0 and Intel TBB libraries. So we MUST include Metavision/lib
+# in ldconfig, but we quarantine the conflicting third-party libraries by moving them
+# to a disabled/ subfolder.
+#
+# Our approach:
+# - lib64: Core Arena SDK libraries (libarena*.so, GenTL_LUCID.cti)
+# - GenICam: GenICam transport layer libraries (ARM64 path)
+# - ffmpeg: Video encoding support (optional, but harmless)
+# - Metavision/lib: Metavision SDK (with third-party libs quarantined)
+#
+# Libraries kept in Metavision/lib:
+# - libmetavision_sdk_*.so* (core Metavision SDK)
+# - libopencv*.so* (OpenCV 4.0 - required by Metavision, doesn't conflict with system OpenCV 4.6)
+# - libtbb*.so* (Intel TBB - required by OpenCV)
+#
+# See README.md section "Arena SDK Ubuntu 24.04 Compatibility" for details.
+
 echo -e "\n${YELLOW}Installing Arena SDK system libraries...${NC}"
 echo "This step requires sudo privileges to install shared libraries."
 cd "${SDK_INSTALL_DIR}/ArenaSDK"
 
-if [[ -f "Arena_SDK_ARM64.conf" ]]; then
-    sudo sh Arena_SDK_ARM64.conf
-    echo -e "${GREEN}SDK libraries installed${NC}"
-else
-    echo -e "${RED}Warning: Arena_SDK_ARM64.conf not found${NC}"
+CONF_FILE="Arena_SDK.conf"
+CURRENTDIR="${PWD}"
+
+echo -e "${YELLOW}Configuring Arena SDK library paths...${NC}"
+echo ""
+echo "Adding the following paths to /etc/ld.so.conf.d/${CONF_FILE}:"
+echo "  ${CURRENTDIR}/lib64"
+echo "  ${CURRENTDIR}/GenICam/library/lib/Linux64_ARM"
+echo "  ${CURRENTDIR}/ffmpeg"
+echo "  ${CURRENTDIR}/Metavision/lib"
+echo ""
+echo -e "${YELLOW}NOTE: Metavision/lib is included (libarena.so depends on it)${NC}"
+echo -e "${YELLOW}      Conflicting third-party libraries will be quarantined for Ubuntu 24.04 compatibility${NC}"
+
+# Remove existing conf file if present (clean install)
+sudo rm -f /etc/ld.so.conf.d/${CONF_FILE}
+
+# Create new conf file with required paths (including Metavision for libarena.so dependency)
+sudo sh -c "echo '${CURRENTDIR}/lib64' > /etc/ld.so.conf.d/${CONF_FILE}"
+sudo sh -c "echo '${CURRENTDIR}/GenICam/library/lib/Linux64_ARM' >> /etc/ld.so.conf.d/${CONF_FILE}"
+sudo sh -c "echo '${CURRENTDIR}/ffmpeg' >> /etc/ld.so.conf.d/${CONF_FILE}"
+sudo sh -c "echo '${CURRENTDIR}/Metavision/lib' >> /etc/ld.so.conf.d/${CONF_FILE}"
+
+# Quarantine conflicting third-party libraries in Metavision/lib
+# These libraries were compiled for Ubuntu 22.04 and conflict with Ubuntu 24.04 system libs
+# We keep only: libmetavision_sdk_* (core SDK), libopencv* (OpenCV 4.0), libtbb* (Intel TBB)
+echo -e "\n${YELLOW}Quarantining conflicting Metavision third-party libraries...${NC}"
+METAVISION_LIB="${CURRENTDIR}/Metavision/lib"
+if [[ -d "${METAVISION_LIB}" ]]; then
+    mkdir -p "${METAVISION_LIB}/disabled"
+    cd "${METAVISION_LIB}"
+    QUARANTINE_COUNT=0
+    for f in *.so*; do
+        [[ -e "$f" ]] || continue  # Skip if no matches
+        case "$f" in
+            libmetavision_sdk*|libopencv*|libtbb*)
+                # Keep these libraries - required by Arena SDK
+                ;;
+            *)
+                mv "$f" disabled/
+                ((QUARANTINE_COUNT++))
+                ;;
+        esac
+    done
+    echo -e "${GREEN}Quarantined ${QUARANTINE_COUNT} conflicting libraries to Metavision/lib/disabled/${NC}"
+    cd "${SDK_INSTALL_DIR}/ArenaSDK"
 fi
+
+# Install runtime dependencies
+echo -e "\n${YELLOW}Installing runtime dependencies...${NC}"
+sudo apt-get -y install libibverbs1 librdmacm1
+
+# Configure network buffer sizes for GigE Vision performance
+echo -e "\n${YELLOW}Configuring network buffer sizes...${NC}"
+if ! grep -q "net.core.rmem_default=33554432" /etc/sysctl.conf 2>/dev/null; then
+    sudo sh -c "echo 'net.core.rmem_default=33554432' >> /etc/sysctl.conf"
+fi
+if ! grep -q "net.core.rmem_max=33554432" /etc/sysctl.conf 2>/dev/null; then
+    sudo sh -c "echo 'net.core.rmem_max=33554432' >> /etc/sysctl.conf"
+fi
+
+# Update library cache
+sudo ldconfig
+
+echo -e "${GREEN}SDK libraries installed (Ubuntu 24.04 compatible)${NC}"
 
 # Install Python package
 echo -e "\n${YELLOW}Installing Arena Python API...${NC}"
@@ -122,12 +205,13 @@ ARENA_SDK_DIR="${SCRIPT_DIR}/ArenaSDK"
 export LD_LIBRARY_PATH="${ARENA_SDK_DIR}/lib64:${LD_LIBRARY_PATH}"
 export LD_LIBRARY_PATH="${ARENA_SDK_DIR}/GenICam/library/lib/Linux64_ARM:${LD_LIBRARY_PATH}"
 export LD_LIBRARY_PATH="${ARENA_SDK_DIR}/ffmpeg:${LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${ARENA_SDK_DIR}/Metavision/lib:${LD_LIBRARY_PATH}"
 
 # GenICam environment variables
 export GENICAM_GENTL64_PATH="${ARENA_SDK_DIR}/GenICam/library/lib/Linux64_ARM"
 export GENICAM_ROOT_V3_1="${ARENA_SDK_DIR}/GenICam"
 
-echo "Arena SDK environment configured"
+echo "Arena SDK environment configured (ARM64)"
 echo "SDK Path: ${ARENA_SDK_DIR}"
 EOF
 

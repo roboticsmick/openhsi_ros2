@@ -1,0 +1,41 @@
+{
+    "camera_type": "lucid",
+    "camera_id": "OpenHSI-06",
+    "pixel_format": "Mono12",
+    "binxy": [2, 2],
+
+    "win_resolution": [464, 532],
+    "win_offset": [42, 76],
+
+    "row_slice": [7, 455],
+
+    "crop_offset_y": 7,
+    "crop_offset_x": 0,
+    "crop_height": 448,
+    "crop_width": 532,
+
+    "exposure_ms": 8.417,
+
+    "wavelength_start_nm": 426.07,
+    "wavelength_end_nm": 897.69,
+    "num_spectral_bands": 532,
+    "num_spatial_pixels": 448,
+    "pixel_dispersion_nm_px": 0.895,
+
+    "fwhm_nm": 4,
+
+    "final_image_shape_after_crop_and_transpose": [532, 448],
+    "resolution": [448, 532],
+
+    "axis_order_before_transpose": "spatial,spectral",
+    "axis_order_after_transpose": "spectral,spatial",
+
+    "exposure_presets_ms": [
+        5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 18.0, 20.0, 25.0, 30.0, 40.0, 50.0
+    ],
+
+    "camera_notes": "Lucid Vision Lab Phoenix camera (PHX016S-M) with IMX273 sensor. Mono12, bin2x2. Original OpenHSI calibration. After transpose: rows=spectral (532 bands, 426-898nm), cols=spatial (448 cross-track pixels).",
+    "calibration_file": "OpenHSI-06_calibration_Mono12_bin2_window.nc",
+    "calibration_date": "2021-05-26",
+    "operator": "OpenHSI"
+}
