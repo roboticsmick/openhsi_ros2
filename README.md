@@ -46,7 +46,7 @@ source install/setup.bash
 ```bash
 ros2 run openhsi_ros2 hyperspec_node --ros-args \
     -p camera_type:=lucid \
-    -p config_file:=/media/logic/USamsung/dai_ws/src/openhsi_ros2/config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
+    -p config_file:=/media/logic/USamsung/dai_ws/src/openhsi_ros2/config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273_corrected.json \
     -p processing_lvl:=0 \
     -p cap_hz:=10.0 \
     -p exposure_ms:=15.0
