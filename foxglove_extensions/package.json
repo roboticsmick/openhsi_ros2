@@ -1,0 +1,41 @@
+{
+  "name": "foxglove-hypercube-panel",
+  "displayName": "Hypercube Waterfall Panel",
+  "description": "Visualize hyperspectral line scan data as an RGB waterfall with spectrum viewer",
+  "version": "1.2.1",
+  "license": "MIT",
+  "author": {
+    "name": "Michael Venz"
+  },
+  "publisher": "rangerbot",
+  "homepage": "https://github.com/rangerbot/foxglove-hypercube-panel",
+  "keywords": [
+    "foxglove",
+    "hyperspectral",
+    "waterfall",
+    "spectral",
+    "imaging"
+  ],
+  "main": "dist/extension.js",
+  "scripts": {
+    "build": "npx foxglove-extension build",
+    "dev": "npx foxglove-extension build --watch",
+    "package": "npx foxglove-extension package",
+    "clean": "rm -rf dist",
+    "prepackage": "npm run build"
+  },
+  "devDependencies": {
+    "@foxglove/extension": "^2.0.0",
+    "@foxglove/schemas": "^1.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "create-foxglove-extension": "^1.1.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

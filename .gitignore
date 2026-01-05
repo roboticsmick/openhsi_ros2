@@ -1,14 +1,14 @@
 # Developer folders
-config/lucid_calibration/Archive/
-config/openhsi_calibration
-config/openhsi_headwall_jetson
-config/tests
-config/coding_guidelines.md
-config/headwall_documentation
-config/research
-config/lucid_calibration/*.nc
-config/ximea_calibration/*.nc
-test/
+openhsi_ros2/config/lucid_calibration/Archive/
+openhsi_ros2/config/openhsi_calibration
+openhsi_ros2/config/openhsi_headwall_jetson
+openhsi_ros2/config/tests
+openhsi_ros2/config/coding_guidelines.md
+openhsi_ros2/config/headwall_documentation
+openhsi_ros2/config/research
+openhsi_ros2/config/lucid_calibration/*.nc
+openhsi_ros2/config/ximea_calibration/*.nc
+openhsi_ros2/test/
 arena_sdk/
 
 # Byte-compiled / optimized / DLL files
@@ -218,3 +218,5 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+node_modules/
+*.foxe

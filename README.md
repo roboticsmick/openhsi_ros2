@@ -31,22 +31,33 @@ ROS2 package for hyperspectral line-scan cameras. Publishes individual line scan
 ### 1. Clone and Build
 
 ```bash
-cd /media/logic/USamsung/dai_ws/src
-git clone https://github.com/your-org/openhsi_ros2.git
+# Clone into your ROS2 workspace src folder
+cd ~/ros2_ws/src
+git clone https://github.com/roboticsmick/openhsi_ros2.git
 
-# Build the message package first (optional but recommended)
-cd /media/logic/USamsung/dai_ws
-colcon build --packages-select openhsi_msgs
-colcon build --packages-select openhsi_ros2
+# Build all packages (openhsi_msgs + openhsi_ros2)
+cd ~/ros2_ws
+colcon build --packages-select openhsi_msgs openhsi_ros2
 source install/setup.bash
 ```
+
+> **Note:** Both `openhsi_msgs` and `openhsi_ros2` packages are in the same repository. Colcon automatically discovers and builds them in the correct order.
 
 ### 2. Run the Node
 
 ```bash
+# Using installed config (after colcon build)
 ros2 run openhsi_ros2 hyperspec_node --ros-args \
     -p camera_type:=lucid \
-    -p config_file:=/media/logic/USamsung/dai_ws/src/openhsi_ros2/config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273_corrected.json \
+    -p config_file:=$(ros2 pkg prefix openhsi_ros2)/share/openhsi_ros2/config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
+    -p processing_lvl:=0 \
+    -p cap_hz:=10.0 \
+    -p exposure_ms:=15.0
+
+# Or using source path directly
+ros2 run openhsi_ros2 hyperspec_node --ros-args \
+    -p camera_type:=lucid \
+    -p config_file:=~/ros2_ws/src/openhsi_ros2/openhsi_ros2/config/lucid_calibration/cam_settings_lucid_phoenix_1_6_IMX273.json \
     -p processing_lvl:=0 \
     -p cap_hz:=10.0 \
     -p exposure_ms:=15.0
@@ -162,7 +173,7 @@ A custom Foxglove extension for visualizing hyperspectral data as an RGB waterfa
 **Installation:**
 
 ```bash
-cd foxglove-hypercube-panel
+cd ~/ros2_ws/src/openhsi_ros2/foxglove_extensions
 npm install
 npm run package
 ```
@@ -229,7 +240,7 @@ Download from [Lucid Vision Downloads](https://thinklucid.com/downloads-hub/):
 
 ```bash
 # Run the installation script
-cd /media/logic/USamsung/dai_ws/src/openhsi_ros2
+cd ~/ros2_ws/src/openhsi_ros2
 ./install_arena_sdk_x64.sh  # or install_arena_sdk_ARM.sh for Jetson
 ```
 
@@ -554,26 +565,44 @@ The Arena SDK may conflict with system OpenCV on Ubuntu 24.04. Run:
 ## Directory Structure
 
 ```bash
-openhsi_ros2/
-├── openhsi_ros2/
-│   └── hyperspec_node.py      # Main ROS2 node
-├── config/
-│   ├── lucid_calibration/     # Lucid camera configs
-│   └── ximea_calibration/     # XIMEA camera configs
-├── arena_sdk/                 # Lucid Arena SDK (after install)
-├── launch/
-│   └── hyperspec_launch.py    # Launch file
-├── install_arena_sdk_x64.sh   # x64 SDK installer
-├── install_arena_sdk_ARM.sh   # ARM64 SDK installer
+openhsi_ros2/                      # Git repository root
+├── openhsi_ros2/                  # Main ROS2 package
+│   ├── package.xml
+│   ├── setup.py
+│   ├── openhsi_ros2/
+│   │   └── hyperspec_node.py     # Main ROS2 node
+│   ├── config/
+│   │   ├── lucid_calibration/    # Lucid camera configs
+│   │   └── ximea_calibration/    # XIMEA camera configs
+│   ├── launch/
+│   │   └── hyperspec_launch.py   # Launch file
+│   └── test/
+├── openhsi_msgs/                  # Custom messages package
+│   ├── package.xml
+│   ├── CMakeLists.txt
+│   └── msg/
+│       └── HyperspectralImage.msg
+├── foxglove_extensions/           # Foxglove visualization panel
+│   ├── src/
+│   ├── package.json
+│   └── README.md
+├── arena_sdk/                     # Lucid Arena SDK (after install)
+├── docs/                          # Documentation and archives
+├── install_arena_sdk_x64.sh       # x64 SDK installer
+├── install_arena_sdk_ARM.sh       # ARM64 SDK installer
+├── LICENSE
 └── README.md
 ```
 
 ---
 
-## Related Packages
+## Included Packages
 
-- **openhsi_msgs** - Custom ROS2 messages for hyperspectral data
-- **foxglove-hypercube-panel** - Foxglove extension for waterfall visualization
+This repository contains multiple packages:
+
+- **openhsi_ros2** - Main ROS2 node for hyperspectral camera capture
+- **openhsi_msgs** - Custom ROS2 messages for hyperspectral data (HyperspectralImage.msg)
+- **foxglove_extensions** - Foxglove extension for hypercube waterfall visualization
 
 ---
 
