@@ -71,6 +71,7 @@ export interface PanelSettings {
   wavelengthTopic: string;
   hyperspectralTopic: string;  // Combined HyperspectralImage topic
   useHyperspectralMsg: boolean; // Whether to use HyperspectralImage or separate topics
+  manualAxisOrder: string;      // Axis order for separate topics mode ("auto", "spatial,spectral" or "spectral,spatial")
   waterfallLines: number;
   rgbPreset: string;
   customRedNm: number;
@@ -85,6 +86,9 @@ export interface PanelSettings {
   // Spectrum Y-axis settings
   spectrumAutoScaleY: boolean;  // Auto-scale Y axis to data range
   spectrumYMax: number;         // Fixed Y maximum when not auto-scaling (e.g., 4095 for 12-bit)
+  // Waterfall display transforms
+  flipVertical: boolean;        // Flip waterfall on vertical axis (mirror left-right)
+  flipHorizontal: boolean;      // Flip waterfall on horizontal axis (mirror top-bottom)
 }
 
 /**
@@ -95,6 +99,7 @@ export const DEFAULT_SETTINGS: PanelSettings = {
   wavelengthTopic: "/hyperspec/wavelengths",
   hyperspectralTopic: "/hyperspec/hyperspectral_image",
   useHyperspectralMsg: true,  // Prefer HyperspectralImage by default
+  manualAxisOrder: "auto",  // Auto-detect from wavelength count vs image dimensions
   waterfallLines: 256,
   rgbPreset: "visible",
   customRedNm: 650,
@@ -108,6 +113,8 @@ export const DEFAULT_SETTINGS: PanelSettings = {
   selectedPixelY: null,
   spectrumAutoScaleY: true,   // Auto-scale by default
   spectrumYMax: 4095,         // 12-bit max (Mono12 cameras)
+  flipVertical: false,        // No flip by default
+  flipHorizontal: false,      // No flip by default
 };
 
 /**

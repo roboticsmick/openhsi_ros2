@@ -1,0 +1,67 @@
+{
+    "_comment": "=== CAMERA SETTINGS TEMPLATE FOR HYPERSPECTRAL CAMERAS ===",
+    "_instructions": "Copy this template and fill in values for your camera. All fields marked REQUIRED must be present.",
+
+    "_section_camera_identity": "=== CAMERA IDENTITY (REQUIRED) ===",
+    "camera_type": "lucid | ximea | custom",
+    "camera_id": "Human-readable camera name (e.g., OpenHSI-06, MVCV-1082)",
+    "serial_num": "Camera serial number from manufacturer",
+
+    "_section_sensor_format": "=== SENSOR FORMAT (REQUIRED) ===",
+    "pixel_format": "Mono12 | Mono16 | XI_RAW16 | etc.",
+    "bit_depth": 12,
+    "_bit_depth_note": "Effective bit depth: 12 for Mono12 (max 4095), 16 for Mono16/XI_RAW16 (max 65535)",
+    "binxy": [1, 1],
+    "_binxy_note": "[x_bin, y_bin] - sensor binning factors",
+
+    "_section_capture_window": "=== CAPTURE WINDOW (REQUIRED) ===",
+    "win_offset_x": 0,
+    "win_offset_y": 0,
+    "win_width": 1024,
+    "win_height": 512,
+    "_capture_note": "Hardware ROI settings sent to camera API",
+
+    "_section_software_crop": "=== SOFTWARE CROP (OPTIONAL) ===",
+    "crop_offset_x": 0,
+    "crop_offset_y": 0,
+    "crop_width": null,
+    "crop_height": null,
+    "_crop_note": "Additional software crop after capture. null = use full captured image",
+
+    "_section_final_image": "=== FINAL IMAGE GEOMETRY (REQUIRED) ===",
+    "num_spatial_pixels": 1024,
+    "num_spectral_bands": 343,
+    "final_image_shape": [1024, 343],
+    "_shape_note": "[height, width] of the FINAL published image after all processing",
+
+    "_section_axis_order": "=== AXIS ORDER AND ORIENTATION (REQUIRED) ===",
+    "axis_order": "spatial,spectral",
+    "_axis_order_note": "How the FINAL image is organized: 'spatial,spectral' means height=spatial, width=spectral. 'spectral,spatial' means height=spectral, width=spatial.",
+    "_axis_order_examples": {
+        "XIMEA_default": "spatial,spectral (1024 spatial rows, 343 spectral columns)",
+        "Lucid_after_transpose": "spectral,spatial (532 spectral rows, 448 spatial columns)"
+    },
+    "flip_spatial": false,
+    "_flip_spatial_note": "Set true to flip the spatial axis (rows) to match RGB camera orientation. Use if hyperspectral image appears vertically mirrored compared to other cameras.",
+
+    "_section_wavelength_calibration": "=== WAVELENGTH CALIBRATION (REQUIRED) ===",
+    "wavelength_start_nm": 400.0,
+    "wavelength_end_nm": 1000.0,
+    "pixel_dispersion_nm_px": 1.75,
+    "_dispersion_note": "Nanometers per pixel in spectral direction",
+    "spectral_offset_px": 0,
+    "_offset_note": "If wavelengths are calculated from a reference pixel (e.g., pixel0_wavelength + offset * dispersion)",
+    "fwhm_nm": 6.0,
+    "_fwhm_note": "Full Width at Half Maximum - spectral resolution",
+
+    "_section_exposure": "=== EXPOSURE (REQUIRED) ===",
+    "exposure_ms": 10.0,
+    "exposure_presets_ms": [5.0, 10.0, 15.0, 20.0, 30.0, 50.0],
+    "_exposure_note": "Default exposure and available presets",
+
+    "_section_metadata": "=== METADATA (OPTIONAL) ===",
+    "calibration_file": "calibration_data.nc",
+    "calibration_date": "2024-01-01",
+    "operator": "Your name",
+    "camera_notes": "Free-form notes about this camera setup"
+}

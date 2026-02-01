@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PanelExtensionContext } from "@foxglove/extension";
+import { PanelExtensionContext, SettingsTreeAction, SettingsTreeNodes } from "@foxglove/extension";
 
 import {
   ImageMessage,
@@ -15,6 +15,177 @@ import {
   generateWavelengths,
   parseMono16Image,
 } from "./spectralUtils";
+
+/**
+ * Build settings tree for the Foxglove settings panel sidebar
+ */
+function buildSettingsTree(settings: PanelSettings): SettingsTreeNodes {
+  return {
+    topics: {
+      label: "Topics",
+      fields: {
+        useHyperspectralMsg: {
+          label: "Use Combined Message",
+          input: "boolean",
+          value: settings.useHyperspectralMsg,
+          help: "Use HyperspectralImage message (combined image + wavelengths)",
+        },
+        hyperspectralTopic: {
+          label: "Hyperspectral Topic",
+          input: "string",
+          value: settings.hyperspectralTopic,
+          disabled: !settings.useHyperspectralMsg,
+        },
+        imageTopic: {
+          label: "Image Topic",
+          input: "string",
+          value: settings.imageTopic,
+          disabled: settings.useHyperspectralMsg,
+        },
+        wavelengthTopic: {
+          label: "Wavelength Topic",
+          input: "string",
+          value: settings.wavelengthTopic,
+          disabled: settings.useHyperspectralMsg,
+        },
+      },
+    },
+    axis: {
+      label: "Axis Configuration",
+      fields: {
+        manualAxisOrder: {
+          label: "Axis Order",
+          input: "select",
+          value: settings.manualAxisOrder,
+          options: [
+            { label: "Auto (detect from WL count)", value: "auto" },
+            { label: "spatial,spectral (XIMEA/ROS1)", value: "spatial,spectral" },
+            { label: "spectral,spatial (Lucid)", value: "spectral,spatial" },
+          ],
+          disabled: settings.useHyperspectralMsg,
+          help: "For separate topics mode only. Combined messages include axis order.",
+        },
+      },
+    },
+    waterfall: {
+      label: "Waterfall Display",
+      fields: {
+        waterfallLines: {
+          label: "Buffer Lines",
+          input: "number",
+          value: settings.waterfallLines,
+          min: 32,
+          max: 1024,
+          step: 32,
+          help: "Number of lines to keep in waterfall buffer",
+        },
+        flipVertical: {
+          label: "Flip Vertical",
+          input: "boolean",
+          value: settings.flipVertical,
+          help: "Mirror waterfall left-right (flip on vertical axis)",
+        },
+        flipHorizontal: {
+          label: "Flip Horizontal",
+          input: "boolean",
+          value: settings.flipHorizontal,
+          help: "Mirror waterfall top-bottom (flip on horizontal axis)",
+        },
+      },
+    },
+    rgb: {
+      label: "RGB Composition",
+      fields: {
+        rgbPreset: {
+          label: "RGB Preset",
+          input: "select",
+          value: settings.rgbPreset,
+          options: RGB_PRESETS.map((p) => ({
+            label: `${p.name} (${p.red}/${p.green}/${p.blue}nm)`,
+            value: p.name,
+          })),
+        },
+        customRedNm: {
+          label: "Red (nm)",
+          input: "number",
+          value: settings.customRedNm,
+          min: 350,
+          max: 1100,
+          disabled: settings.rgbPreset !== "custom",
+        },
+        customGreenNm: {
+          label: "Green (nm)",
+          input: "number",
+          value: settings.customGreenNm,
+          min: 350,
+          max: 1100,
+          disabled: settings.rgbPreset !== "custom",
+        },
+        customBlueNm: {
+          label: "Blue (nm)",
+          input: "number",
+          value: settings.customBlueNm,
+          min: 350,
+          max: 1100,
+          disabled: settings.rgbPreset !== "custom",
+        },
+      },
+    },
+    normalization: {
+      label: "Image Normalization",
+      fields: {
+        autoNormalize: {
+          label: "Auto Normalize",
+          input: "boolean",
+          value: settings.autoNormalize,
+          help: "Automatically normalize using percentile clipping",
+        },
+        normalizePercentileLow: {
+          label: "Low Percentile (%)",
+          input: "number",
+          value: settings.normalizePercentileLow,
+          min: 0,
+          max: 50,
+          step: 0.5,
+          disabled: !settings.autoNormalize,
+        },
+        normalizePercentileHigh: {
+          label: "High Percentile (%)",
+          input: "number",
+          value: settings.normalizePercentileHigh,
+          min: 50,
+          max: 100,
+          step: 0.5,
+          disabled: !settings.autoNormalize,
+        },
+      },
+    },
+    spectrum: {
+      label: "Spectrum Panel",
+      fields: {
+        showSpectrum: {
+          label: "Show Spectrum",
+          input: "boolean",
+          value: settings.showSpectrum,
+        },
+        spectrumAutoScaleY: {
+          label: "Auto Scale Y",
+          input: "boolean",
+          value: settings.spectrumAutoScaleY,
+          disabled: !settings.showSpectrum,
+        },
+        spectrumYMax: {
+          label: "Y-Axis Max",
+          input: "number",
+          value: settings.spectrumYMax,
+          min: 1,
+          max: 65535,
+          disabled: !settings.showSpectrum || settings.spectrumAutoScaleY,
+        },
+      },
+    },
+  };
+}
 
 /**
  * Hypercube Waterfall Panel
@@ -59,8 +230,32 @@ export function HypercubePanel({
     context.saveState(settings);
   }, [context, settings]);
 
-  // State for axis order from HyperspectralImage message
+  // Handle settings changes from Foxglove sidebar
+  const handleSettingsAction = useCallback((action: SettingsTreeAction) => {
+    if (action.action === "update") {
+      const { path, value } = action.payload;
+      setSettings((prev) => {
+        const newSettings = { ...prev };
+        const key = path[1] as keyof PanelSettings;
+        if (key in newSettings) {
+          (newSettings as Record<string, unknown>)[key] = value;
+        }
+        return newSettings;
+      });
+    }
+  }, []);
+
+  // Update settings tree in Foxglove sidebar when settings change
+  useEffect(() => {
+    context.updatePanelSettingsEditor({
+      actionHandler: handleSettingsAction,
+      nodes: buildSettingsTree(settings),
+    });
+  }, [context, handleSettingsAction, settings]);
+
+  // State for axis order from HyperspectralImage message or auto-detection
   const [axisOrder, setAxisOrder] = useState<string>("spatial,spectral");
+  const [detectedAxisOrder, setDetectedAxisOrder] = useState<string | null>(null);
 
   // Subscribe to topics based on mode
   useEffect(() => {
@@ -272,8 +467,16 @@ export function HypercubePanel({
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
 
-      const x = Math.floor((event.clientX - rect.left) * scaleX);
-      const y = Math.floor((event.clientY - rect.top) * scaleY);
+      let x = Math.floor((event.clientX - rect.left) * scaleX);
+      let y = Math.floor((event.clientY - rect.top) * scaleY);
+
+      // Account for flip transforms - CSS transform affects visual but not click coords
+      if (settings.flipVertical) {
+        x = canvas.width - 1 - x;
+      }
+      if (settings.flipHorizontal) {
+        y = canvas.height - 1 - y;
+      }
 
       const lineCount = buffer.getLineCount();
       const dims = buffer.getDimensions();
@@ -296,7 +499,7 @@ export function HypercubePanel({
         });
       }
     },
-    [wavelengths]
+    [wavelengths, settings.flipVertical, settings.flipHorizontal]
   );
 
   // Helper function to process image data and add to buffer
@@ -316,8 +519,38 @@ export function HypercubePanel({
     // axis_order tells us how the IMAGE is organized (after any transpose in the node)
     let spatial: number;
     let spectral: number;
+    let effectiveAxisOrder = msgAxisOrder;
 
-    if (msgAxisOrder === "spectral,spatial") {
+    // Auto-detect axis order from wavelength count if set to "auto"
+    if (msgAxisOrder === "auto") {
+      // Use wavelengths from message or from state
+      const wlCount = msgWavelengths?.length ?? wavelengths?.length ?? 0;
+
+      if (wlCount > 0) {
+        // Compare wavelength count to image dimensions
+        if (wlCount === imgMsg.width) {
+          // Wavelengths match width → width=spectral, height=spatial
+          effectiveAxisOrder = "spatial,spectral";
+          console.log("[HypercubePanel] Auto-detected axis order: spatial,spectral (WL count", wlCount, "matches width)");
+        } else if (wlCount === imgMsg.height) {
+          // Wavelengths match height → height=spectral, width=spatial
+          effectiveAxisOrder = "spectral,spatial";
+          console.log("[HypercubePanel] Auto-detected axis order: spectral,spatial (WL count", wlCount, "matches height)");
+        } else {
+          // No match - fall back to spatial,spectral and warn
+          effectiveAxisOrder = "spatial,spectral";
+          console.warn("[HypercubePanel] Could not auto-detect axis order: WL count", wlCount,
+            "doesn't match width", imgMsg.width, "or height", imgMsg.height, "- defaulting to spatial,spectral");
+        }
+        setDetectedAxisOrder(effectiveAxisOrder);
+      } else {
+        // No wavelengths yet - use default and wait for wavelength data
+        effectiveAxisOrder = "spatial,spectral";
+        console.log("[HypercubePanel] Auto-detect: waiting for wavelength data, using default spatial,spectral");
+      }
+    }
+
+    if (effectiveAxisOrder === "spectral,spatial") {
       // height=spectral, width=spatial (Lucid after transpose)
       spectral = imgMsg.height;
       spatial = imgMsg.width;
@@ -328,7 +561,7 @@ export function HypercubePanel({
     }
 
     console.log("[HypercubePanel] Image:", imgMsg.width, "x", imgMsg.height,
-      "axis_order:", msgAxisOrder, "→ spatial:", spatial, "spectral:", spectral);
+      "axis_order:", effectiveAxisOrder, "→ spatial:", spatial, "spectral:", spectral);
 
     // Initialize or reinitialize buffer if dimensions change
     if (
@@ -354,13 +587,13 @@ export function HypercubePanel({
       setWavelengths(defaultWl);
     }
 
-    // Parse image data - parseMono16Image handles the transpose internally
-    // based on the assumption that height=spectral, width=spatial after node transpose
+    // Parse image data - parseMono16Image handles transpose based on axis order
     const lineData = parseMono16Image(
       imgMsg.data,
       imgMsg.width,
       imgMsg.height,
-      imgMsg.is_bigendian
+      imgMsg.is_bigendian,
+      effectiveAxisOrder
     );
     bufferRef.current.addLine(lineData);
     setMessageCount((c) => c + 1);
@@ -421,8 +654,8 @@ export function HypercubePanel({
                 // Handle separate image topic
                 if (message.topic === settings.imageTopic) {
                   const imgMsg = message.message as ImageMessage;
-                  // Use current axis order state for separate image messages
-                  processImageData(imgMsg, axisOrder, null);
+                  // Use manual axis order setting for separate topics mode (ROS1 bags)
+                  processImageData(imgMsg, settings.manualAxisOrder, null);
                 }
               }
             } catch (msgErr) {
@@ -460,14 +693,6 @@ export function HypercubePanel({
     }
   }, [selectedSpectrum, renderSpectrum]);
 
-  // Settings panel
-  const updateSetting = <K extends keyof PanelSettings>(
-    key: K,
-    value: PanelSettings[K]
-  ) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
-  };
-
   return (
     <div
       style={{
@@ -481,189 +706,34 @@ export function HypercubePanel({
         overflow: "hidden",
       }}
     >
-      {/* Header / Settings */}
+      {/* Header - Status info only */}
       <div
         style={{
-          padding: "8px",
+          padding: "4px 8px",
           borderBottom: "1px solid #333",
           display: "flex",
-          flexWrap: "wrap",
-          gap: "8px",
+          gap: "12px",
           alignItems: "center",
+          fontSize: "11px",
+          color: "#888",
         }}
       >
-        {/* Topic mode toggle */}
-        <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-          <input
-            type="checkbox"
-            checked={settings.useHyperspectralMsg}
-            onChange={(e) => updateSetting("useHyperspectralMsg", e.target.checked)}
-          />
-          Combined msg
-        </label>
-
-        {settings.useHyperspectralMsg ? (
-          /* Combined HyperspectralImage topic */
-          <label>
-            Topic:
-            <input
-              type="text"
-              value={settings.hyperspectralTopic}
-              onChange={(e) => updateSetting("hyperspectralTopic", e.target.value)}
-              style={{
-                marginLeft: "4px",
-                padding: "2px 4px",
-                backgroundColor: "#2a2a3e",
-                border: "1px solid #444",
-                color: "#eee",
-                width: "200px",
-              }}
-            />
-          </label>
-        ) : (
-          /* Separate Image and Wavelength topics */
-          <>
-            <label>
-              Image:
-              <input
-                type="text"
-                value={settings.imageTopic}
-                onChange={(e) => updateSetting("imageTopic", e.target.value)}
-                style={{
-                  marginLeft: "4px",
-                  padding: "2px 4px",
-                  backgroundColor: "#2a2a3e",
-                  border: "1px solid #444",
-                  color: "#eee",
-                  width: "140px",
-                }}
-              />
-            </label>
-
-            <label>
-              WL:
-              <input
-                type="text"
-                value={settings.wavelengthTopic}
-                onChange={(e) => updateSetting("wavelengthTopic", e.target.value)}
-                style={{
-                  marginLeft: "4px",
-                  padding: "2px 4px",
-                  backgroundColor: "#2a2a3e",
-                  border: "1px solid #444",
-                  color: "#eee",
-                  width: "140px",
-                }}
-              />
-            </label>
-          </>
-        )}
-
-        <label>
-          RGB:
-          <select
-            value={settings.rgbPreset}
-            onChange={(e) => updateSetting("rgbPreset", e.target.value)}
-            style={{
-              marginLeft: "4px",
-              padding: "2px",
-              backgroundColor: "#2a2a3e",
-              border: "1px solid #444",
-              color: "#eee",
-            }}
-          >
-            {RGB_PRESETS.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name} ({p.red}/{p.green}/{p.blue}nm)
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {settings.rgbPreset === "custom" && (
-          <>
-            <label>
-              R:
-              <input
-                type="number"
-                value={settings.customRedNm}
-                onChange={(e) =>
-                  updateSetting("customRedNm", parseFloat(e.target.value))
-                }
-                style={{
-                  marginLeft: "2px",
-                  width: "50px",
-                  padding: "2px",
-                  backgroundColor: "#2a2a3e",
-                  border: "1px solid #444",
-                  color: "#ff6666",
-                }}
-              />
-            </label>
-            <label>
-              G:
-              <input
-                type="number"
-                value={settings.customGreenNm}
-                onChange={(e) =>
-                  updateSetting("customGreenNm", parseFloat(e.target.value))
-                }
-                style={{
-                  marginLeft: "2px",
-                  width: "50px",
-                  padding: "2px",
-                  backgroundColor: "#2a2a3e",
-                  border: "1px solid #444",
-                  color: "#66ff66",
-                }}
-              />
-            </label>
-            <label>
-              B:
-              <input
-                type="number"
-                value={settings.customBlueNm}
-                onChange={(e) =>
-                  updateSetting("customBlueNm", parseFloat(e.target.value))
-                }
-                style={{
-                  marginLeft: "2px",
-                  width: "50px",
-                  padding: "2px",
-                  backgroundColor: "#2a2a3e",
-                  border: "1px solid #444",
-                  color: "#6666ff",
-                }}
-              />
-            </label>
-          </>
-        )}
-
-        <label>
-          Lines:
-          <input
-            type="number"
-            value={settings.waterfallLines}
-            onChange={(e) =>
-              updateSetting("waterfallLines", parseInt(e.target.value, 10))
-            }
-            min={32}
-            max={1024}
-            style={{
-              marginLeft: "4px",
-              width: "60px",
-              padding: "2px",
-              backgroundColor: "#2a2a3e",
-              border: "1px solid #444",
-              color: "#eee",
-            }}
-          />
-        </label>
-
-        <span style={{ marginLeft: "auto", color: "#888" }}>
+        <span>
           {dimensions
             ? `${dimensions.spatial}x${dimensions.spectral} | ${messageCount} frames`
             : "Waiting for data..."}
+        </span>
+        <span>
+          {wavelengths
+            ? `L: ${wavelengths[0]?.toFixed(0)}-${wavelengths[wavelengths.length - 1]?.toFixed(0)}nm (${wavelengths.length})`
+            : ""}
+        </span>
+        <span style={{ marginLeft: "auto" }}>
+          axis: {settings.useHyperspectralMsg
+            ? axisOrder
+            : settings.manualAxisOrder === "auto"
+              ? (detectedAxisOrder ? `auto→${detectedAxisOrder}` : "auto (waiting)")
+              : settings.manualAxisOrder}
         </span>
       </div>
 
@@ -694,6 +764,7 @@ export function HypercubePanel({
               height: "100%",
               imageRendering: "pixelated",
               cursor: "crosshair",
+              transform: `${settings.flipVertical ? "scaleX(-1)" : ""} ${settings.flipHorizontal ? "scaleY(-1)" : ""}`.trim() || undefined,
             }}
           />
           {!dimensions && (
@@ -749,42 +820,14 @@ export function HypercubePanel({
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                gap: "12px",
               }}
             >
               <span>
                 Spectrum at pixel ({selectedSpectrum.pixelX}, line {selectedSpectrum.lineIndex})
               </span>
-              <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                  <input
-                    type="checkbox"
-                    checked={settings.spectrumAutoScaleY}
-                    onChange={(e) => updateSetting("spectrumAutoScaleY", e.target.checked)}
-                  />
-                  Auto Y
-                </label>
-                {!settings.spectrumAutoScaleY && (
-                  <label style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    Y Max:
-                    <input
-                      type="number"
-                      value={settings.spectrumYMax}
-                      onChange={(e) => updateSetting("spectrumYMax", parseInt(e.target.value, 10) || 4095)}
-                      min={1}
-                      max={65535}
-                      style={{
-                        width: "60px",
-                        padding: "2px 4px",
-                        backgroundColor: "#2a2a3e",
-                        border: "1px solid #444",
-                        color: "#eee",
-                        fontSize: "11px",
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
+              <span style={{ color: "#666" }}>
+                {settings.spectrumAutoScaleY ? "Auto Y" : `Y: 0-${settings.spectrumYMax}`}
+              </span>
             </div>
             <canvas
               ref={spectrumCanvasRef}
@@ -815,35 +858,6 @@ export function HypercubePanel({
         </div>
       )}
 
-      {/* Footer / Status */}
-      <div
-        style={{
-          padding: "4px 8px",
-          borderTop: "1px solid #333",
-          fontSize: "10px",
-          color: "#666",
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "12px",
-        }}
-      >
-        <span>
-          {wavelengths
-            ? `WL: ${wavelengths[0]?.toFixed(0)}-${wavelengths[wavelengths.length - 1]?.toFixed(0)}nm (${wavelengths.length})`
-            : "Wavelengths: waiting..."}
-        </span>
-        <span style={{ color: "#888" }}>
-          axis: {axisOrder}
-        </span>
-        <label style={{ marginLeft: "auto" }}>
-          <input
-            type="checkbox"
-            checked={settings.showSpectrum}
-            onChange={(e) => updateSetting("showSpectrum", e.target.checked)}
-          />
-          Show Spectrum Panel
-        </label>
-      </div>
     </div>
   );
 }

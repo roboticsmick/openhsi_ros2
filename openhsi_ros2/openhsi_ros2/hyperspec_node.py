@@ -934,7 +934,13 @@ def software_crop_image(image: np.ndarray, settings: Dict[str, Any]) -> np.ndarr
         end_x = start_x + crop_width
 
     cropped = image[start_y:end_y, start_x:end_x]
-    return cropped.T
+    result = cropped.T
+
+    # Optionally flip spatial axis to match RGB camera orientation
+    if settings.get("flip_spatial", False):
+        result = np.flipud(result)
+
+    return result
 
 
 def apply_calibration(
@@ -2026,6 +2032,15 @@ class HyperspectralROS2Node(Node):
                 "axis_order_after_transpose",
                 self.camera.settings.get("axis_order", "spatial,spectral")
             )
+            # Bit depth from config or derive from pixel_format
+            bit_depth = self.camera.settings.get("bit_depth")
+            if bit_depth is None:
+                pixel_format = self.camera.settings.get("pixel_format", "Mono16")
+                if "12" in pixel_format:
+                    bit_depth = 12
+                else:
+                    bit_depth = 16
+            hyper_msg.bit_depth = int(bit_depth)
             hyper_msg.exposure_ms = float(self.camera.settings["exposure_ms"])
             # Use cached temperature to avoid device I/O on every frame
             hyper_msg.sensor_temperature_c = float(self._get_cached_temperature())

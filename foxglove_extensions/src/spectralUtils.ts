@@ -264,44 +264,76 @@ export class WaterfallBuffer {
 /**
  * Parse mono16 image data from ROS Image message
  *
- * After the ROS2 node's transpose, the image is:
- *   - height (rows) = spectral bands
- *   - width (cols) = spatial pixels
- *
  * The WaterfallBuffer expects data in (spatial, spectral) order:
  *   - data[spatial * nSpectral + spectral] = pixel value
  *
- * So we need to transpose from (spectral, spatial) to (spatial, spectral)
+ * Depending on axis_order:
+ *   - "spectral,spatial": height=spectral, width=spatial → needs transpose
+ *   - "spatial,spectral": height=spatial, width=spectral → direct copy
  */
 export function parseMono16Image(
   data: Uint8Array | ArrayBuffer,
-  width: number,  // = spatial pixels
-  height: number, // = spectral bands
-  isBigEndian: boolean
+  width: number,
+  height: number,
+  isBigEndian: boolean,
+  axisOrder: string = "spectral,spatial"
 ): Uint16Array {
   const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-  const nSpatial = width;
-  const nSpectral = height;
+
+  let nSpatial: number;
+  let nSpectral: number;
+
+  if (axisOrder === "spectral,spatial") {
+    // height=spectral, width=spatial (Lucid after transpose)
+    nSpectral = height;
+    nSpatial = width;
+  } else {
+    // "spatial,spectral" - height=spatial, width=spectral (XIMEA)
+    nSpatial = height;
+    nSpectral = width;
+  }
+
   const result = new Uint16Array(nSpatial * nSpectral);
 
-  // Transpose from (spectral, spatial) row-major to (spatial, spectral) order
-  // Input: data[spectral_row * width + spatial_col]
-  // Output: result[spatial * nSpectral + spectral]
-  for (let spectral = 0; spectral < nSpectral; spectral++) {
-    for (let spatial = 0; spatial < nSpatial; spatial++) {
-      const srcIdx = spectral * nSpatial + spatial;
-      const byteIdx = srcIdx * 2;
+  if (axisOrder === "spectral,spatial") {
+    // Transpose from (spectral, spatial) row-major to (spatial, spectral) order
+    // Input: data[spectral_row * width + spatial_col]
+    // Output: result[spatial * nSpectral + spectral]
+    for (let spectral = 0; spectral < nSpectral; spectral++) {
+      for (let spatial = 0; spatial < nSpatial; spatial++) {
+        const srcIdx = spectral * nSpatial + spatial;
+        const byteIdx = srcIdx * 2;
 
-      let pixelValue: number;
-      if (isBigEndian) {
-        pixelValue = (bytes[byteIdx]! << 8) | bytes[byteIdx + 1]!;
-      } else {
-        pixelValue = bytes[byteIdx]! | (bytes[byteIdx + 1]! << 8);
+        let pixelValue: number;
+        if (isBigEndian) {
+          pixelValue = (bytes[byteIdx]! << 8) | bytes[byteIdx + 1]!;
+        } else {
+          pixelValue = bytes[byteIdx]! | (bytes[byteIdx + 1]! << 8);
+        }
+
+        // Store in transposed order: (spatial, spectral)
+        const dstIdx = spatial * nSpectral + spectral;
+        result[dstIdx] = pixelValue;
       }
+    }
+  } else {
+    // "spatial,spectral" - direct copy, data is already in correct order
+    // Input: data[spatial_row * width + spectral_col]
+    // Output: result[spatial * nSpectral + spectral]
+    for (let spatial = 0; spatial < nSpatial; spatial++) {
+      for (let spectral = 0; spectral < nSpectral; spectral++) {
+        const srcIdx = spatial * nSpectral + spectral;
+        const byteIdx = srcIdx * 2;
 
-      // Store in transposed order: (spatial, spectral)
-      const dstIdx = spatial * nSpectral + spectral;
-      result[dstIdx] = pixelValue;
+        let pixelValue: number;
+        if (isBigEndian) {
+          pixelValue = (bytes[byteIdx]! << 8) | bytes[byteIdx + 1]!;
+        } else {
+          pixelValue = bytes[byteIdx]! | (bytes[byteIdx + 1]! << 8);
+        }
+
+        result[srcIdx] = pixelValue;
+      }
     }
   }
 

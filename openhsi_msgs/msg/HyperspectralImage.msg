@@ -32,6 +32,7 @@ float64 pixel_dispersion_nm_px   # Wavelength spacing per pixel (e.g., 1.75)
 # "spatial,spectral" = rows are spatial, cols are spectral (default)
 string axis_order
 
-# Optional exposure metadata
+# Sensor metadata
+uint8 bit_depth                  # Effective bit depth (12 for Mono12, 16 for Mono16)
 float64 exposure_ms              # Exposure time in milliseconds
 float64 sensor_temperature_c     # Sensor temperature in Celsius
