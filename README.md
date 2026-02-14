@@ -2,6 +2,8 @@
 
 ROS2 package for hyperspectral line-scan cameras. Publishes individual line scans as ROS2 topics for synchronized data logging and real-time visualization.
 
+![Hyperspectral data playback in Foxglove](docs/assets/foxglove_hypercube_waterfall.png)
+
 ## Supported Cameras
 
 | Camera | Connection | SDK |
