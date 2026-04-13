@@ -24,6 +24,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+devel/
 downloads/
 docs/openhsi-archive
 eggs/
